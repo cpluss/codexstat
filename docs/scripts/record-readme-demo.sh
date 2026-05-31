@@ -1,9 +1,10 @@
 #!/bin/bash
-# Record the README terminal demo GIF from the local codexstat output.
+# Capture the README terminal screenshot from the local codexstat output.
 #
 # Prerequisites:
 #   brew install asciinema
 #   cargo install --git https://github.com/asciinema/agg agg
+#   brew install imagemagick
 #
 # This intentionally uses the caller's real Codex auth/session data so the
 # README image matches the actual pretty-printed output. The command runs with
@@ -14,7 +15,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUTPUT_DIR="$REPO_ROOT/docs/images"
-OUTPUT="$OUTPUT_DIR/codexstat-demo.gif"
+OUTPUT="$OUTPUT_DIR/codexstat-demo.png"
 
 WORK_DIR="$(mktemp -d)"
 DEMO_BIN_DIR="$WORK_DIR/bin"
@@ -36,6 +37,11 @@ if ! command -v agg >/dev/null 2>&1; then
 	exit 1
 fi
 
+if ! command -v magick >/dev/null 2>&1; then
+	echo "Error: magick not found. Install with: brew install imagemagick" >&2
+	exit 1
+fi
+
 (
 	cd "$REPO_ROOT"
 	go build -o "$DEMO_BIN_DIR/codexstat" ./cmd/codexstat
@@ -49,7 +55,9 @@ export TERM=xterm-256color
 export COLORTERM=truecolor
 unset NO_COLOR
 
-CAST_FILE="${OUTPUT%.gif}.cast"
+CAST_FILE="$WORK_DIR/codexstat-demo.cast"
+TMP_GIF="$WORK_DIR/codexstat-demo.gif"
+TMP_FLAT_GIF="$WORK_DIR/codexstat-demo-flat.gif"
 DEMO_SCRIPT="$WORK_DIR/run-demo.sh"
 
 cat > "$DEMO_SCRIPT" <<'SH'
@@ -62,7 +70,7 @@ sleep 2.5
 SH
 chmod +x "$DEMO_SCRIPT"
 
-echo "Recording codexstat output to $OUTPUT..."
+echo "Capturing codexstat output to $OUTPUT..."
 echo "Terminal: 118x40"
 
 asciinema rec "$CAST_FILE" \
@@ -70,28 +78,23 @@ asciinema rec "$CAST_FILE" \
 	--overwrite \
 	-c "bash '$DEMO_SCRIPT'"
 
-echo "Converting to GIF..."
+echo "Rendering final frame..."
 
-agg "$CAST_FILE" "$OUTPUT" \
+agg "$CAST_FILE" "$TMP_GIF" \
 	--font-family "JetBrains Mono,Menlo,Monaco,monospace" \
 	--font-size 11 \
 	--theme dracula \
 	--speed 1
 
-if command -v magick >/dev/null 2>&1; then
-	TMP_OUTPUT="${OUTPUT%.gif}.tmp.gif"
-	magick "$OUTPUT" \
-		-coalesce \
-		-fill "#1e1e2d" \
-		-opaque "#282a36" \
-		-background "#1e1e2d" \
-		-alpha remove \
-		-alpha off \
-		-layers Optimize \
-		"$TMP_OUTPUT"
-	mv "$TMP_OUTPUT" "$OUTPUT"
-fi
+magick "$TMP_GIF" \
+	-coalesce \
+	-fill "#1e1e2d" \
+	-opaque "#282a36" \
+	-background "#1e1e2d" \
+	-alpha remove \
+	-alpha off \
+	"$TMP_FLAT_GIF"
 
-rm -f "$CAST_FILE"
+magick "${TMP_FLAT_GIF}[-1]" "$OUTPUT"
 
-echo "Recorded $OUTPUT"
+echo "Captured $OUTPUT"
