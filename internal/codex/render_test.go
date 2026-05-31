@@ -33,7 +33,10 @@ func TestRenderTextIncludesTokenUsage(t *testing.T) {
 	if !strings.Contains(out, "Tokens/day graph") {
 		t.Fatalf("missing token time chart:\n%s", out)
 	}
-	if !strings.Contains(out, "[####################] 1.2K") {
+	if strings.Contains(out, "#") {
+		t.Fatalf("output should not use ASCII hash graphs:\n%s", out)
+	}
+	if !strings.Contains(out, "████████████████████ 1.2K") {
 		t.Fatalf("missing token graph:\n%s", out)
 	}
 	if !strings.Contains(out, "Aggregate") {

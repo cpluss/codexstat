@@ -114,7 +114,10 @@ func TestRenderHistoryShowsGraph(t *testing.T) {
 		}},
 	}
 	out := RenderHistory(report, RenderOptions{})
-	if !strings.Contains(out, "[#####---------------] 25%") {
+	if strings.Contains(out, "#") {
+		t.Fatalf("output should not use ASCII hash graphs:\n%s", out)
+	}
+	if !strings.Contains(out, "█████░░░░░░░░░░░░░░░ 25%") {
 		t.Fatalf("missing graph in output:\n%s", out)
 	}
 }

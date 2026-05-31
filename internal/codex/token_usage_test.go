@@ -108,10 +108,13 @@ func TestRenderTokenUsageShowsDayOverDayGraph(t *testing.T) {
 	if !strings.Contains(out, "Tokens/day graph") {
 		t.Fatalf("missing time chart:\n%s", out)
 	}
-	if !strings.Contains(out, "[##########----------] 1K") {
+	if strings.Contains(out, "#") {
+		t.Fatalf("output should not use ASCII hash graphs:\n%s", out)
+	}
+	if !strings.Contains(out, "██████████░░░░░░░░░░ 1K") {
 		t.Fatalf("missing half-width graph:\n%s", out)
 	}
-	if !strings.Contains(out, "[####################] 2K") {
+	if !strings.Contains(out, "████████████████████ 2K") {
 		t.Fatalf("missing full-width graph:\n%s", out)
 	}
 	if !strings.Contains(out, "Aggregate") {

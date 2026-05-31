@@ -13,8 +13,7 @@ type RenderOptions struct {
 func RenderText(snapshot *Snapshot, opts RenderOptions) string {
 	var lines []string
 	title := "Codex stats"
-	lines = append(lines, colorize(title, "1;36", opts.Color))
-	lines = append(lines, strings.Repeat("-", len(title)))
+	lines = append(lines, sectionTitle(title, opts))
 	lines = append(lines, summaryLine(snapshot))
 	lines = append(lines, "")
 
@@ -29,7 +28,7 @@ func RenderText(snapshot *Snapshot, opts RenderOptions) string {
 		lines = append(lines, "")
 	}
 
-	lines = append(lines, renderDetails(snapshot)...)
+	lines = append(lines, renderDetails(snapshot, opts)...)
 	for _, warning := range snapshot.Warnings {
 		lines = append(lines, "Warning: "+warning)
 	}
@@ -56,22 +55,14 @@ type usageRow struct {
 }
 
 func renderUsageTable(rows []usageRow, opts RenderOptions) []string {
-	titleWidth := len("Window")
-	resetWidth := len("Reset")
 	renderedRows := make([]struct {
 		usageRow
 		reset string
 	}, 0, len(rows))
 	for _, row := range rows {
-		if len(row.Title) > titleWidth {
-			titleWidth = len(row.Title)
-		}
 		reset := "-"
 		if row.Window.ResetsAt != nil {
 			reset = row.Window.ResetIn + " (" + row.Window.ResetsAt.Local().Format("Jan 02 15:04 MST") + ")"
-		}
-		if len(reset) > resetWidth {
-			resetWidth = len(reset)
 		}
 		renderedRows = append(renderedRows, struct {
 			usageRow
@@ -79,71 +70,48 @@ func renderUsageTable(rows []usageRow, opts RenderOptions) []string {
 		}{usageRow: row, reset: reset})
 	}
 
-	header := fmt.Sprintf(
-		"%-*s  %6s  %6s  %-*s  %s",
-		titleWidth,
-		"Window",
-		"Used",
-		"Left",
-		resetWidth,
-		"Reset",
-		"Usage",
-	)
-	lines := []string{
-		colorize(header, "1;37", opts.Color),
-		fmt.Sprintf(
-			"%-*s  %6s  %6s  %-*s  %s",
-			titleWidth,
-			strings.Repeat("-", titleWidth),
-			"------",
-			"------",
-			resetWidth,
-			strings.Repeat("-", resetWidth),
-			"--------------------",
-		),
-	}
-
+	tableRows := make([][]string, 0, len(renderedRows))
 	for _, row := range renderedRows {
-		bar := usageBar(row.Window.UsedPercent, 20)
-		if opts.Color {
-			bar = colorizeBar(bar, row.Window.RemainingPercent)
-		}
-		lines = append(lines, fmt.Sprintf(
-			"%-*s  %6s  %6s  %-*s  %s",
-			titleWidth,
+		tableRows = append(tableRows, []string{
 			row.Title,
 			formatPercent(row.Window.UsedPercent),
 			formatPercent(row.Window.RemainingPercent),
-			resetWidth,
 			row.reset,
-			bar,
-		))
+			progressBar(row.Window.UsedPercent, 20, opts, healthFillColor(row.Window.RemainingPercent)),
+		})
 	}
-	return lines
+	return renderPrettyTable(
+		[]string{"Window", "Used", "Left", "Reset", "Usage"},
+		tableRows,
+		opts,
+		1,
+		2,
+	)
 }
 
-func renderDetails(snapshot *Snapshot) []string {
+func renderDetails(snapshot *Snapshot, opts RenderOptions) []string {
 	var lines []string
-	lines = append(lines, "Details")
-	lines = append(lines, "-------")
+	lines = append(lines, sectionTitle("Details", opts))
+	var rows [][]string
 	if snapshot.Source != "" {
-		lines = append(lines, "Source: "+string(snapshot.Source))
+		rows = append(rows, []string{"Source", string(snapshot.Source)})
 	}
 	if snapshot.Credits != nil {
-		lines = append(lines, "Credits: "+formatCredits(*snapshot.Credits))
+		rows = append(rows, []string{"Credits", formatCredits(*snapshot.Credits)})
 	}
 	if snapshot.Account != nil {
 		if snapshot.Account.Email != "" {
-			lines = append(lines, "Account: "+snapshot.Account.Email)
+			rows = append(rows, []string{"Account", snapshot.Account.Email})
 		}
 		if snapshot.Account.Plan != "" {
-			lines = append(lines, "Plan: "+displayPlan(snapshot.Account.Plan))
+			rows = append(rows, []string{"Plan", displayPlan(snapshot.Account.Plan)})
 		}
 		if snapshot.Account.AccountID != "" {
-			lines = append(lines, "Account ID: "+snapshot.Account.AccountID)
+			rows = append(rows, []string{"Account ID", snapshot.Account.AccountID})
 		}
 	}
-	lines = append(lines, "Updated: "+snapshot.UpdatedAt.Local().Format("2006-01-02 15:04:05 MST"))
+	rows = append(rows, []string{"Updated", snapshot.UpdatedAt.Local().Format("2006-01-02 15:04:05 MST")})
+	lines = append(lines, renderKeyValueTable(rows, opts)...)
 	return lines
 }
 
@@ -166,21 +134,6 @@ func summaryLine(snapshot *Snapshot) string {
 	return strings.Join(parts, " | ")
 }
 
-func usageBar(percent float64, width int) string {
-	percent = clamp(percent, 0, 100)
-	filled := int((percent / 100) * float64(width))
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > width {
-		filled = width
-	}
-	if percent > 0 && filled == 0 {
-		filled = 1
-	}
-	return "[" + strings.Repeat("#", filled) + strings.Repeat("-", width-filled) + "]"
-}
-
 func formatPercent(value float64) string {
 	if value == float64(int(value)) {
 		return fmt.Sprintf("%d%%", int(value))
@@ -199,24 +152,6 @@ func formatCredits(credits Credits) string {
 		return "not available"
 	}
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", *credits.Balance), "0"), ".")
-}
-
-func colorize(text, code string, enabled bool) string {
-	if !enabled {
-		return text
-	}
-	return "\x1b[" + code + "m" + text + "\x1b[0m"
-}
-
-func colorizeBar(bar string, remainingPercent float64) string {
-	switch {
-	case remainingPercent < 10:
-		return colorize(bar, "31", true)
-	case remainingPercent < 25:
-		return colorize(bar, "33", true)
-	default:
-		return colorize(bar, "32", true)
-	}
 }
 
 func displayPlan(plan string) string {

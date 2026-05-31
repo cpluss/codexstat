@@ -10,6 +10,7 @@ It is intentionally narrower than CodexBar: it has no menu bar UI and no browser
 - Codex session, weekly, additional model-specific limits, account, plan, and credits
 - Codex token usage scanned from local session JSONL logs
 - append-only local JSONL quota snapshot history for session/weekly percentage graphs
+- Unicode terminal tables, progress bars, and token/day charts via Charmbracelet-style rendering libraries
 
 ## Build
 
