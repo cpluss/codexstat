@@ -13,6 +13,10 @@ It is intentionally narrower than CodexBar: it has no menu bar UI and no browser
 - append-only local JSONL quota snapshot history for session/weekly percentage graphs
 - Unicode terminal tables, progress bars, and token/day charts via Charmbracelet-style rendering libraries
 
+<p align="center">
+  <img src="docs/images/codexstat-demo.gif" width="792" alt="codexstat terminal demo showing Codex limits and token usage">
+</p>
+
 ## Build
 
 ```sh
