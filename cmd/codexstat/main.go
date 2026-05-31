@@ -221,8 +221,21 @@ func shouldUseColor(noColor bool) bool {
 	if strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
 		return false
 	}
+	if forceColorEnabled() {
+		return true
+	}
 	info, err := os.Stdout.Stat()
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+}
+
+func forceColorEnabled() bool {
+	for _, key := range []string{"FORCE_COLOR", "CLICOLOR_FORCE"} {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value != "" && value != "0" {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSON(value any, pretty bool) {

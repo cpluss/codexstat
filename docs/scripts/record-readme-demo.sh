@@ -43,6 +43,10 @@ fi
 
 export PATH="$DEMO_BIN_DIR:$PATH"
 export CODEXSTAT_HISTORY="$WORK_DIR/history.jsonl"
+export FORCE_COLOR=1
+export CLICOLOR_FORCE=1
+export TERM=xterm-256color
+export COLORTERM=truecolor
 unset NO_COLOR
 
 CAST_FILE="${OUTPUT%.gif}.cast"
@@ -73,6 +77,20 @@ agg "$CAST_FILE" "$OUTPUT" \
 	--font-size 11 \
 	--theme dracula \
 	--speed 1
+
+if command -v magick >/dev/null 2>&1; then
+	TMP_OUTPUT="${OUTPUT%.gif}.tmp.gif"
+	magick "$OUTPUT" \
+		-coalesce \
+		-fill "#1e1e2d" \
+		-opaque "#282a36" \
+		-background "#1e1e2d" \
+		-alpha remove \
+		-alpha off \
+		-layers Optimize \
+		"$TMP_OUTPUT"
+	mv "$TMP_OUTPUT" "$OUTPUT"
+fi
 
 rm -f "$CAST_FILE"
 
