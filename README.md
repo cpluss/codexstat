@@ -7,7 +7,8 @@ It is intentionally narrower than CodexBar: it has no menu bar UI and no browser
 - OAuth usage API from `~/.codex/auth.json` or `$CODEX_HOME/auth.json`
 - automatic OAuth token refresh after 8 days
 - `codex app-server` JSON-RPC fallback for local CLI usage
-- Codex session, weekly, additional model-specific limits, account, plan, and credits
+- Codex session, weekly, and additional model-specific limits in text output
+- full account, plan, credit, source, and scan metadata in JSON output
 - Codex token usage scanned from local session JSONL logs
 - append-only local JSONL quota snapshot history for session/weekly percentage graphs
 - Unicode terminal tables, progress bars, and token/day charts via Charmbracelet-style rendering libraries
@@ -34,7 +35,7 @@ go build ./cmd/codexstat
 
 The default source is `auto`: OAuth first, then local `codex app-server` if OAuth is unavailable.
 
-The main `codexstat` output always includes a 7-day token usage table. The same data is also included in `--json` output under `token_usage`.
+The main `codexstat` text output focuses on limits and a 7-day token usage table. The `--json` output keeps the full fetched detail under the top-level fields and `token_usage`.
 
 `codexstat history` is the focused token-history view and defaults to token totals. It scans:
 

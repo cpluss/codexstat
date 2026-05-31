@@ -208,15 +208,22 @@ func stringField(values map[string]any, keys ...string) string {
 }
 
 func parseTimeString(value string) *time.Time {
+	if parsed, ok := parseRFC3339Time(value); ok {
+		return &parsed
+	}
+	return nil
+}
+
+func parseRFC3339Time(value string) (time.Time, bool) {
 	if value == "" {
-		return nil
+		return time.Time{}, false
 	}
 	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
 		if parsed, err := time.Parse(layout, value); err == nil {
-			return &parsed
+			return parsed, true
 		}
 	}
-	return nil
+	return time.Time{}, false
 }
 
 func accountFromCredentials(creds credentials, planFallback string) *Account {

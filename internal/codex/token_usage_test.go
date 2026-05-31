@@ -111,14 +111,25 @@ func TestRenderTokenUsageShowsDayOverDayGraph(t *testing.T) {
 	if strings.Contains(out, "#") {
 		t.Fatalf("output should not use ASCII hash graphs:\n%s", out)
 	}
-	if !strings.Contains(out, "██████████░░░░░░░░░░ 1K") {
-		t.Fatalf("missing half-width graph:\n%s", out)
-	}
-	if !strings.Contains(out, "████████████████████ 2K") {
-		t.Fatalf("missing full-width graph:\n%s", out)
+	if strings.Contains(out, "Graph") {
+		t.Fatalf("day summary should not include a graph column:\n%s", out)
 	}
 	if !strings.Contains(out, "Aggregate") {
 		t.Fatalf("missing aggregate row:\n%s", out)
+	}
+	if !strings.Contains(out, "│ Aggregate") {
+		t.Fatalf("aggregate should remain in the daily table:\n%s", out)
+	}
+	if !strings.Contains(out, "│ "+tableSeparatorCell) {
+		t.Fatalf("missing separator before aggregate row:\n%s", out)
+	}
+	if strings.Contains(out, "aggregate ") {
+		t.Fatalf("chart footer should not repeat aggregate:\n%s", out)
+	}
+	for _, unwanted := range []string{"files", "events", "Sessions", "Events", "roots"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("pretty output includes unwanted detail %q:\n%s", unwanted, out)
+		}
 	}
 }
 

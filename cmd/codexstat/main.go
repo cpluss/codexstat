@@ -112,32 +112,21 @@ func runNow(args []string) {
 		}
 	}
 
-	tokenUsage, err := codex.BuildTokenUsageReport(codex.TokenUsageQuery{
+	tokenUsageQuery := codex.TokenUsageQuery{
 		Days:      codex.DefaultTokenUsageDays,
 		Metric:    "tokens",
 		Now:       time.Now(),
 		CodexHome: *codexHome,
-	})
+	}
+	tokenUsage, err := codex.BuildTokenUsageReport(tokenUsageQuery)
 	if err != nil {
 		snapshot.Warnings = append(snapshot.Warnings, "token usage unavailable: "+err.Error())
-		tokenUsage = codex.EmptyTokenUsageReport(codex.TokenUsageQuery{
-			Days:      codex.DefaultTokenUsageDays,
-			Metric:    "tokens",
-			Now:       time.Now(),
-			CodexHome: *codexHome,
-		})
-	} else {
+		tokenUsage = codex.EmptyTokenUsageReport(tokenUsageQuery)
 	}
 	snapshot.TokenUsage = &tokenUsage
 
 	if *jsonFlag {
-		enc := json.NewEncoder(os.Stdout)
-		if *prettyFlag {
-			enc.SetIndent("", "  ")
-		}
-		if err := enc.Encode(snapshot); err != nil {
-			exitErr(err, 1)
-		}
+		writeJSON(snapshot, *prettyFlag)
 		return
 	}
 
@@ -172,13 +161,7 @@ func runHistory(args []string) {
 			exitErr(err, 1)
 		}
 		if *jsonFlag {
-			enc := json.NewEncoder(os.Stdout)
-			if *prettyFlag {
-				enc.SetIndent("", "  ")
-			}
-			if err := enc.Encode(report); err != nil {
-				exitErr(err, 1)
-			}
+			writeJSON(report, *prettyFlag)
 			return
 		}
 		fmt.Println(codex.RenderTokenUsage(report, codex.RenderOptions{
@@ -211,13 +194,7 @@ func runHistory(args []string) {
 	}
 
 	if *jsonFlag {
-		enc := json.NewEncoder(os.Stdout)
-		if *prettyFlag {
-			enc.SetIndent("", "  ")
-		}
-		if err := enc.Encode(report); err != nil {
-			exitErr(err, 1)
-		}
+		writeJSON(report, *prettyFlag)
 		return
 	}
 
@@ -246,6 +223,16 @@ func shouldUseColor(noColor bool) bool {
 	}
 	info, err := os.Stdout.Stat()
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+}
+
+func writeJSON(value any, pretty bool) {
+	enc := json.NewEncoder(os.Stdout)
+	if pretty {
+		enc.SetIndent("", "  ")
+	}
+	if err := enc.Encode(value); err != nil {
+		exitErr(err, 1)
+	}
 }
 
 func exitErr(err error, code int) {

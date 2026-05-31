@@ -325,25 +325,29 @@ func windowFromUsageSnapshot(details *rateLimitDetails, primary bool, now time.T
 	if details == nil {
 		return nil
 	}
-	var snapshot *windowSnapshot
 	if primary {
-		snapshot = details.PrimaryWindow
+		return windowFromUsageWindow(details.PrimaryWindow, now)
 	} else {
-		snapshot = details.SecondaryWindow
+		return windowFromUsageWindow(details.SecondaryWindow, now)
 	}
+}
+
+func windowFromUsageWindow(snapshot *windowSnapshot, now time.Time) *Window {
 	if snapshot == nil {
 		return nil
 	}
-	windowMinutes := 0
-	if snapshot.LimitWindowSeconds > 0 {
-		windowMinutes = snapshot.LimitWindowSeconds / 60
-	}
+	window := usageWindow(snapshot, now)
+	return &window
+}
+
+func usageWindow(snapshot *windowSnapshot, now time.Time) Window {
+	windowMinutes := optionalInt(snapshot.LimitWindowSeconds / 60)
 	var resetsAt *time.Time
 	if snapshot.ResetAt > 0 {
 		reset := time.Unix(snapshot.ResetAt, 0)
 		resetsAt = &reset
 	}
-	return ptr(makeWindow(snapshot.UsedPercent.value(), optionalInt(windowMinutes), resetsAt, now))
+	return makeWindow(snapshot.UsedPercent.value(), windowMinutes, resetsAt, now)
 }
 
 func optionalInt(value int) *int {
@@ -366,20 +370,21 @@ func extraWindowsFromAdditionalLimits(entries []additionalRateLimit, now time.Ti
 }
 
 func namedWindowsFromAdditionalLimit(entry additionalRateLimit, usedIDs map[string]bool, now time.Time) []NamedWindow {
-	if isSparkLimit(entry) {
-		var out []NamedWindow
-		if entry.RateLimit != nil && entry.RateLimit.PrimaryWindow != nil {
-			out = append(out, namedWindow("codex-spark", "Codex Spark 5-hour", entry.RateLimit.PrimaryWindow, usedIDs, now))
-		}
-		if entry.RateLimit != nil && entry.RateLimit.SecondaryWindow != nil {
-			out = append(out, namedWindow("codex-spark-weekly", "Codex Spark Weekly", entry.RateLimit.SecondaryWindow, usedIDs, now))
-		}
-		return compactNamedWindows(out)
-	}
-
 	if entry.RateLimit == nil {
 		return nil
 	}
+
+	if isSparkLimit(entry) {
+		var out []NamedWindow
+		if window, ok := namedWindow("codex-spark", "Codex Spark 5-hour", entry.RateLimit.PrimaryWindow, usedIDs, now); ok {
+			out = append(out, window)
+		}
+		if window, ok := namedWindow("codex-spark-weekly", "Codex Spark Weekly", entry.RateLimit.SecondaryWindow, usedIDs, now); ok {
+			out = append(out, window)
+		}
+		return out
+	}
+
 	snapshot := entry.RateLimit.PrimaryWindow
 	if snapshot == nil {
 		snapshot = entry.RateLimit.SecondaryWindow
@@ -392,47 +397,26 @@ func namedWindowsFromAdditionalLimit(entry additionalRateLimit, usedIDs map[stri
 		return nil
 	}
 	title := firstNonEmpty(entry.LimitName, entry.MeteredFeature, "Codex extra limit")
-	window := namedWindow("codex-"+slug(idSource), title, snapshot, usedIDs, now)
-	if window.ID == "" {
-		return nil
+	if window, ok := namedWindow("codex-"+slug(idSource), title, snapshot, usedIDs, now); ok {
+		return []NamedWindow{window}
 	}
-	return []NamedWindow{window}
+	return nil
 }
 
-func namedWindow(id string, title string, snapshot *windowSnapshot, usedIDs map[string]bool, now time.Time) NamedWindow {
+func namedWindow(id string, title string, snapshot *windowSnapshot, usedIDs map[string]bool, now time.Time) (NamedWindow, bool) {
 	if id == "" || usedIDs[id] || snapshot == nil {
-		return NamedWindow{}
+		return NamedWindow{}, false
 	}
 	usedIDs[id] = true
-	windowMinutes := 0
-	if snapshot.LimitWindowSeconds > 0 {
-		windowMinutes = snapshot.LimitWindowSeconds / 60
-	}
-	var resetsAt *time.Time
-	if snapshot.ResetAt > 0 {
-		reset := time.Unix(snapshot.ResetAt, 0)
-		resetsAt = &reset
-	}
 	return NamedWindow{
 		ID:     id,
 		Title:  title,
-		Window: makeWindow(snapshot.UsedPercent.value(), optionalInt(windowMinutes), resetsAt, now),
-	}
-}
-
-func compactNamedWindows(values []NamedWindow) []NamedWindow {
-	out := values[:0]
-	for _, value := range values {
-		if value.ID != "" {
-			out = append(out, value)
-		}
-	}
-	return out
+		Window: usageWindow(snapshot, now),
+	}, true
 }
 
 func isSparkLimit(entry additionalRateLimit) bool {
-	return strings.Contains(strings.ToLower(entry.LimitName), "spark") ||
-		strings.Contains(strings.ToLower(entry.MeteredFeature), "spark")
+	return strings.Contains(strings.ToLower(entry.LimitName+" "+entry.MeteredFeature), "spark")
 }
 
 func slug(value string) string {

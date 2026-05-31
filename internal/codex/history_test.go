@@ -98,7 +98,7 @@ func TestDefaultHistoryPathUsesOverride(t *testing.T) {
 	}
 }
 
-func TestRenderHistoryShowsGraph(t *testing.T) {
+func TestRenderHistoryOmitsGraphColumn(t *testing.T) {
 	value := 25.0
 	report := HistoryReport{
 		Metric:      "weekly",
@@ -117,8 +117,16 @@ func TestRenderHistoryShowsGraph(t *testing.T) {
 	if strings.Contains(out, "#") {
 		t.Fatalf("output should not use ASCII hash graphs:\n%s", out)
 	}
-	if !strings.Contains(out, "█████░░░░░░░░░░░░░░░ 25%") {
-		t.Fatalf("missing graph in output:\n%s", out)
+	if strings.Contains(out, "Graph") || strings.Contains(out, "█████░░░░░░░░░░░░░░░") {
+		t.Fatalf("history summary should not include a graph column:\n%s", out)
+	}
+	if !strings.Contains(out, "25%") {
+		t.Fatalf("missing weekly limit value:\n%s", out)
+	}
+	for _, unwanted := range []string{"Samples", "Credits", "file ", "samples"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("pretty output includes unwanted detail %q:\n%s", unwanted, out)
+		}
 	}
 }
 

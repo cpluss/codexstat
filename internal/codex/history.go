@@ -25,38 +25,13 @@ type HistoryRecord struct {
 
 func RenderTokenUsage(report TokenUsageReport, opts RenderOptions) string {
 	var lines []string
-	title := "Codex token usage"
-	lines = append(lines, sectionTitle(title, opts))
-	lines = append(lines, fmt.Sprintf(
-		"range %s..%s | metric %s | files %d | events %d | total %s",
-		report.Since,
-		report.Until,
-		report.Metric,
-		report.FilesScanned,
-		report.EventsScanned,
-		formatTokenCount(report.Total.Total),
-	))
-	if len(report.Roots) > 0 {
-		lines = append(lines, "roots "+strings.Join(report.Roots, ", "))
-	}
-	lines = append(lines, "")
-
+	lines = append(lines, sectionTitle("Codex token usage", opts))
 	lines = append(lines, renderTokenUsageRows(report, opts)...)
 	return strings.Join(lines, "\n")
 }
 
 func renderTokenUsageInline(report TokenUsageReport, opts RenderOptions) []string {
-	title := fmt.Sprintf("Token usage (%s..%s)", report.Since, report.Until)
-	lines := []string{
-		sectionTitle(title, opts),
-		fmt.Sprintf(
-			"metric %s | files %d | events %d | total %s",
-			report.Metric,
-			report.FilesScanned,
-			report.EventsScanned,
-			formatTokenCount(report.Total.Total),
-		),
-	}
+	lines := []string{sectionTitle("Token usage", opts)}
 	lines = append(lines, renderTokenUsageRows(report, opts)...)
 	return lines
 }
@@ -68,44 +43,30 @@ func renderTokenUsageRows(report TokenUsageReport, opts RenderOptions) []string 
 		lines = append(lines, "")
 	}
 
-	maxGraph := int64(0)
+	rows := make([][]string, 0, len(report.Days)+2)
 	for _, day := range report.Days {
-		if day.Graph > maxGraph {
-			maxGraph = day.Graph
-		}
-	}
-	totalSessions := 0
-	totalEvents := 0
-	rows := make([][]string, 0, len(report.Days)+1)
-	for _, day := range report.Days {
-		totalSessions += day.Sessions
-		totalEvents += day.Events
 		rows = append(rows, []string{
 			day.Date,
-			fmt.Sprintf("%d", day.Sessions),
-			fmt.Sprintf("%d", day.Events),
 			formatTokenCount(day.Tokens.Input),
 			formatTokenCount(day.Tokens.Cached),
 			formatTokenCount(day.Tokens.Output),
 			formatTokenCount(day.Tokens.Reasoning),
 			formatTokenCount(day.Tokens.Total),
-			tokenUsageGraph(day.Graph, maxGraph, opts),
 		})
 	}
-	aggregateGraph := tokenMetricValue(report.Total, report.Metric)
+	if len(report.Days) > 0 {
+		rows = append(rows, tableSeparatorRow(6))
+	}
 	rows = append(rows, []string{
 		"Aggregate",
-		fmt.Sprintf("%d", totalSessions),
-		fmt.Sprintf("%d", totalEvents),
 		formatTokenCount(report.Total.Input),
 		formatTokenCount(report.Total.Cached),
 		formatTokenCount(report.Total.Output),
 		formatTokenCount(report.Total.Reasoning),
 		formatTokenCount(report.Total.Total),
-		tokenUsageGraph(aggregateGraph, aggregateGraph, opts),
 	})
 	lines = append(lines, renderPrettyTable(
-		[]string{"Date", "Sessions", "Events", "Input", "Cached", "Output", "Reason", "Total", "Graph"},
+		[]string{"Date", "Input", "Cached", "Output", "Reason", "Total"},
 		rows,
 		opts,
 		1,
@@ -113,8 +74,6 @@ func renderTokenUsageRows(report TokenUsageReport, opts RenderOptions) []string 
 		3,
 		4,
 		5,
-		6,
-		7,
 	)...)
 	return lines
 }
@@ -163,17 +122,12 @@ func renderTokenUsageTimeChart(report TokenUsageReport, opts RenderOptions) []st
 	)
 	chart.Draw()
 	lines = append(lines, splitRenderedLines(chart.View())...)
-	lines = append(lines, mutedText(
-		fmt.Sprintf("max/day %s | aggregate %s", formatTokenCount(maxGraph), formatTokenCount(tokenMetricValue(report.Total, report.Metric))),
-		opts,
-	))
+	lines = append(lines, mutedText(fmt.Sprintf("max/day %s", formatTokenCount(maxGraph)), opts))
 	return lines
 }
 
 func tokenUsageChartWidth(days int) int {
 	switch {
-	case days <= 0:
-		return 24
 	case days <= 8:
 		return 24
 	case days <= 31:
@@ -219,15 +173,6 @@ func titleCaseASCII(value string) string {
 		return ""
 	}
 	return strings.ToUpper(value[:1]) + value[1:]
-}
-
-func tokenUsageGraph(value int64, maxValue int64, opts RenderOptions) string {
-	if value <= 0 || maxValue <= 0 {
-		return progressBar(0, 20, opts, colorAccent) + " -"
-	}
-	percent := float64(value) / float64(maxValue) * 100
-	bar := progressBar(percent, 20, opts, colorAccent)
-	return bar + " " + formatTokenCount(value)
 }
 
 func formatTokenCount(value int64) string {
@@ -507,51 +452,24 @@ func firstFloatPtr(values ...*float64) *float64 {
 
 func RenderHistory(report HistoryReport, opts RenderOptions) string {
 	var lines []string
-	title := "Codex quota history"
-	lines = append(lines, sectionTitle(title, opts))
-	lines = append(lines, fmt.Sprintf(
-		"range %s..%s | metric %s | samples %d/%d",
-		report.Since,
-		report.Until,
-		report.Metric,
-		report.MatchedRows,
-		report.TotalRows,
-	))
-	if report.Path != "" {
-		lines = append(lines, "file "+report.Path)
-	}
-	lines = append(lines, "")
+	lines = append(lines, sectionTitle("Codex quota history", opts))
 
 	rows := make([][]string, 0, len(report.Days))
 	for _, day := range report.Days {
-		graph := historyGraph(day.GraphValue, opts)
 		rows = append(rows, []string{
 			day.Date,
-			fmt.Sprintf("%d", day.Samples),
 			formatOptionalPercent(day.SessionPeakUsed),
 			formatOptionalPercent(day.WeeklyLastUsed),
-			formatOptionalCredits(day.CreditsLast),
-			graph,
 		})
 	}
 	lines = append(lines, renderPrettyTable(
-		[]string{"Date", "Samples", "Session peak", "Weekly last", "Credits", "Graph"},
+		[]string{"Date", "Session peak", "Weekly last"},
 		rows,
 		opts,
 		1,
 		2,
-		3,
-		4,
 	)...)
 	return strings.Join(lines, "\n")
-}
-
-func historyGraph(value *float64, opts RenderOptions) string {
-	if value == nil {
-		return progressBar(0, 20, opts, colorAccent) + " -"
-	}
-	bar := progressBar(*value, 20, opts, healthFillColor(100-*value))
-	return bar + " " + formatPercent(*value)
 }
 
 func formatOptionalPercent(value *float64) string {
@@ -559,11 +477,4 @@ func formatOptionalPercent(value *float64) string {
 		return "-"
 	}
 	return formatPercent(*value)
-}
-
-func formatOptionalCredits(value *float64) string {
-	if value == nil {
-		return "-"
-	}
-	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", *value), "0"), ".")
 }

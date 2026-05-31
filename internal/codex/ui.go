@@ -16,6 +16,8 @@ const (
 	colorBorder  = "#30363d"
 	colorWarn    = "#fbbf24"
 	colorDanger  = "#f87171"
+
+	tableSeparatorCell = "────────"
 )
 
 func sectionTitle(title string, opts RenderOptions) string {
@@ -62,6 +64,10 @@ func renderPrettyTable(headers []string, rows [][]string, opts RenderOptions, ri
 			switch {
 			case row == table.HeaderRow:
 				return style.Bold(true).Foreground(lipgloss.Color(colorPrimary))
+			case isTableSeparatorRow(rows, row):
+				return style.Foreground(lipgloss.Color(colorBorder))
+			case isAggregateRow(rows, row):
+				return style.Bold(true).Foreground(lipgloss.Color(colorAccent))
 			case row%2 == 0:
 				return style.Foreground(lipgloss.Color("#c9d1d9"))
 			default:
@@ -72,8 +78,20 @@ func renderPrettyTable(headers []string, rows [][]string, opts RenderOptions, ri
 	return splitRenderedLines(t.Render())
 }
 
-func renderKeyValueTable(rows [][]string, opts RenderOptions) []string {
-	return renderPrettyTable([]string{"Field", "Value"}, rows, opts)
+func tableSeparatorRow(columns int) []string {
+	row := make([]string, columns)
+	for i := range row {
+		row[i] = tableSeparatorCell
+	}
+	return row
+}
+
+func isTableSeparatorRow(rows [][]string, row int) bool {
+	return row >= 0 && row < len(rows) && len(rows[row]) > 0 && rows[row][0] == tableSeparatorCell
+}
+
+func isAggregateRow(rows [][]string, row int) bool {
+	return row >= 0 && row < len(rows) && len(rows[row]) > 0 && rows[row][0] == "Aggregate"
 }
 
 func splitRenderedLines(value string) []string {

@@ -52,7 +52,11 @@ type TokenUsageTotal struct {
 }
 
 func IsTokenHistoryMetric(metric string) bool {
-	switch normalizeTokenMetric(metric) {
+	return isTokenHistoryMetric(normalizeTokenMetric(metric))
+}
+
+func isTokenHistoryMetric(metric string) bool {
+	switch metric {
 	case "tokens", "input", "cached", "output", "reasoning":
 		return true
 	default:
@@ -61,18 +65,12 @@ func IsTokenHistoryMetric(metric string) bool {
 }
 
 func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
-	metric := normalizeTokenMetric(query.Metric)
-	if !IsTokenHistoryMetric(metric) {
-		return TokenUsageReport{}, fmt.Errorf("unknown token metric %q", query.Metric)
+	metricInput := query.Metric
+	query = normalizeTokenUsageQuery(query)
+	if !isTokenHistoryMetric(query.Metric) {
+		return TokenUsageReport{}, fmt.Errorf("unknown token metric %q", metricInput)
 	}
-	query.Metric = metric
 	empty := EmptyTokenUsageReport(query)
-	if query.Days <= 0 {
-		query.Days = DefaultTokenUsageDays
-	}
-	if query.Now.IsZero() {
-		query.Now = time.Now()
-	}
 	if query.Env == nil {
 		query.Env = environMap()
 	}
@@ -126,7 +124,7 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 	var total TokenUsageTotal
 	for _, builder := range dayMap {
 		builder.day.Sessions = len(builder.sessions)
-		builder.day.Graph = tokenMetricValue(builder.day.Tokens, metric)
+		builder.day.Graph = tokenMetricValue(builder.day.Tokens, query.Metric)
 		total.add(builder.day.Tokens)
 		days = append(days, builder.day)
 	}
@@ -134,16 +132,11 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 		return days[i].Date < days[j].Date
 	})
 
-	rootStrings := make([]string, 0, len(roots))
-	for _, root := range roots {
-		rootStrings = append(rootStrings, root)
-	}
-
 	return TokenUsageReport{
-		Metric:        metric,
+		Metric:        query.Metric,
 		Since:         since.Format("2006-01-02"),
 		Until:         until.AddDate(0, 0, -1).Format("2006-01-02"),
-		Roots:         rootStrings,
+		Roots:         roots,
 		FilesScanned:  filesScanned,
 		EventsScanned: eventsScanned,
 		Total:         total,
@@ -152,15 +145,9 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 }
 
 func EmptyTokenUsageReport(query TokenUsageQuery) TokenUsageReport {
-	metric := normalizeTokenMetric(query.Metric)
-	if !IsTokenHistoryMetric(metric) {
-		metric = "tokens"
-	}
-	if query.Days <= 0 {
-		query.Days = DefaultTokenUsageDays
-	}
-	if query.Now.IsZero() {
-		query.Now = time.Now()
+	query = normalizeTokenUsageQuery(query)
+	if !isTokenHistoryMetric(query.Metric) {
+		query.Metric = "tokens"
 	}
 	today := startOfLocalDay(query.Now.Local())
 	since := today.AddDate(0, 0, -(query.Days - 1))
@@ -170,11 +157,22 @@ func EmptyTokenUsageReport(query TokenUsageQuery) TokenUsageReport {
 		days = append(days, TokenUsageDay{Date: day.Format("2006-01-02")})
 	}
 	return TokenUsageReport{
-		Metric: metric,
+		Metric: query.Metric,
 		Since:  since.Format("2006-01-02"),
 		Until:  until.AddDate(0, 0, -1).Format("2006-01-02"),
 		Days:   days,
 	}
+}
+
+func normalizeTokenUsageQuery(query TokenUsageQuery) TokenUsageQuery {
+	query.Metric = normalizeTokenMetric(query.Metric)
+	if query.Days <= 0 {
+		query.Days = DefaultTokenUsageDays
+	}
+	if query.Now.IsZero() {
+		query.Now = time.Now()
+	}
+	return query
 }
 
 type tokenUsageDayBuilder struct {
@@ -271,14 +269,14 @@ func scanCodexTokenFile(path string, since, until time.Time, days map[string]*to
 
 	reader := bufio.NewReaderSize(file, 128*1024)
 	sessionKey := filepath.Base(path)
-	var previous *TokenUsageTotal
+	counter := tokenUsageCounter{}
 	events := 0
 
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
 			if bytes.Contains(line, []byte(`"token_count"`)) {
-				counted, err := scanCodexTokenLine(bytes.TrimSpace(line), sessionKey, since, until, days, &previous)
+				counted, err := scanCodexTokenLine(bytes.TrimSpace(line), sessionKey, since, until, days, &counter)
 				if err != nil {
 					return events, fmt.Errorf("%s: %w", path, err)
 				}
@@ -303,7 +301,7 @@ func scanCodexTokenLine(
 	since time.Time,
 	until time.Time,
 	days map[string]*tokenUsageDayBuilder,
-	previous **TokenUsageTotal,
+	counter *tokenUsageCounter,
 ) (bool, error) {
 	var event codexTokenEvent
 	if err := json.Unmarshal(line, &event); err != nil {
@@ -319,7 +317,7 @@ func scanCodexTokenLine(
 
 	total := event.Payload.Info.TotalTokenUsage.total()
 	last := event.Payload.Info.LastTokenUsage.total()
-	delta, ok := tokenDelta(last, total, previous)
+	delta, ok := counter.delta(last, total)
 	if !ok || delta.empty() {
 		return false, nil
 	}
@@ -339,39 +337,45 @@ func scanCodexTokenLine(
 	return true, nil
 }
 
-func tokenDelta(last *TokenUsageTotal, total *TokenUsageTotal, previous **TokenUsageTotal) (TokenUsageTotal, bool) {
+type tokenUsageCounter struct {
+	previous *TokenUsageTotal
+}
+
+func (c *tokenUsageCounter) delta(last *TokenUsageTotal, total *TokenUsageTotal) (TokenUsageTotal, bool) {
 	if last != nil {
 		delta := *last
 		if total != nil {
-			if *previous != nil {
-				totalDelta := total.delta(**previous)
+			if c.previous != nil {
+				totalDelta := total.delta(*c.previous)
 				if totalDelta.nonNegativeLTE(delta) {
 					delta = totalDelta
 				}
 			}
-			next := *total
-			*previous = &next
+			c.setPrevious(*total)
 		} else {
 			base := TokenUsageTotal{}
-			if *previous != nil {
-				base = **previous
+			if c.previous != nil {
+				base = *c.previous
 			}
 			next := base
 			next.add(delta)
-			*previous = &next
+			c.setPrevious(next)
 		}
 		return delta, true
 	}
 	if total != nil {
 		delta := *total
-		if *previous != nil {
-			delta = total.delta(**previous)
+		if c.previous != nil {
+			delta = total.delta(*c.previous)
 		}
-		next := *total
-		*previous = &next
+		c.setPrevious(*total)
 		return delta, true
 	}
 	return TokenUsageTotal{}, false
+}
+
+func (c *tokenUsageCounter) setPrevious(total TokenUsageTotal) {
+	c.previous = &total
 }
 
 type codexTokenEvent struct {
@@ -410,11 +414,11 @@ func (usage *codexRawTokenUsage) total() *TokenUsageTotal {
 		total = usage.InputTokens + usage.OutputTokens
 	}
 	out := TokenUsageTotal{
-		Input:     maxInt64(0, usage.InputTokens),
-		Cached:    maxInt64(0, cached),
-		Output:    maxInt64(0, usage.OutputTokens),
-		Reasoning: maxInt64(0, usage.ReasoningOutputTokens),
-		Total:     maxInt64(0, total),
+		Input:     max(0, usage.InputTokens),
+		Cached:    max(0, cached),
+		Output:    max(0, usage.OutputTokens),
+		Reasoning: max(0, usage.ReasoningOutputTokens),
+		Total:     max(0, total),
 	}
 	if out.Cached > out.Input {
 		out.Cached = out.Input
@@ -426,10 +430,8 @@ func parseCodexTimestamp(value string) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, errors.New("missing timestamp")
 	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-		if parsed, err := time.Parse(layout, value); err == nil {
-			return parsed, nil
-		}
+	if parsed, ok := parseRFC3339Time(value); ok {
+		return parsed, nil
 	}
 	return time.Time{}, fmt.Errorf("invalid timestamp %q", value)
 }
@@ -444,11 +446,11 @@ func (total *TokenUsageTotal) add(other TokenUsageTotal) {
 
 func (total TokenUsageTotal) delta(previous TokenUsageTotal) TokenUsageTotal {
 	return TokenUsageTotal{
-		Input:     maxInt64(0, total.Input-previous.Input),
-		Cached:    maxInt64(0, total.Cached-previous.Cached),
-		Output:    maxInt64(0, total.Output-previous.Output),
-		Reasoning: maxInt64(0, total.Reasoning-previous.Reasoning),
-		Total:     maxInt64(0, total.Total-previous.Total),
+		Input:     max(0, total.Input-previous.Input),
+		Cached:    max(0, total.Cached-previous.Cached),
+		Output:    max(0, total.Output-previous.Output),
+		Reasoning: max(0, total.Reasoning-previous.Reasoning),
+		Total:     max(0, total.Total-previous.Total),
 	}
 }
 
@@ -487,11 +489,4 @@ func normalizeTokenMetric(metric string) string {
 	default:
 		return metric
 	}
-}
-
-func maxInt64(minimum, value int64) int64 {
-	if value < minimum {
-		return minimum
-	}
-	return value
 }
