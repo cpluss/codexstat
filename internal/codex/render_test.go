@@ -30,6 +30,9 @@ func TestRenderTextIncludesTokenUsage(t *testing.T) {
 	if !strings.Contains(out, "Token usage (2026-05-25..2026-05-31)") {
 		t.Fatalf("missing token usage section:\n%s", out)
 	}
+	if !strings.Contains(out, "Tokens/day graph") {
+		t.Fatalf("missing token time chart:\n%s", out)
+	}
 	if !strings.Contains(out, "[####################] 1.2K") {
 		t.Fatalf("missing token graph:\n%s", out)
 	}

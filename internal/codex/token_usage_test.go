@@ -105,6 +105,9 @@ func TestRenderTokenUsageShowsDayOverDayGraph(t *testing.T) {
 	if !strings.Contains(out, "Codex token usage") {
 		t.Fatalf("missing title:\n%s", out)
 	}
+	if !strings.Contains(out, "Tokens/day graph") {
+		t.Fatalf("missing time chart:\n%s", out)
+	}
 	if !strings.Contains(out, "[##########----------] 1K") {
 		t.Fatalf("missing half-width graph:\n%s", out)
 	}

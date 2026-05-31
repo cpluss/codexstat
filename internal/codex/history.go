@@ -63,6 +63,10 @@ func renderTokenUsageInline(report TokenUsageReport, opts RenderOptions) []strin
 
 func renderTokenUsageRows(report TokenUsageReport, opts RenderOptions) []string {
 	var lines []string
+	lines = append(lines, renderTokenUsageTimeChart(report, opts)...)
+	if len(lines) > 0 {
+		lines = append(lines, "")
+	}
 	header := fmt.Sprintf(
 		"%-10s  %8s  %8s  %9s  %9s  %9s  %9s  %9s  %s",
 		"Date",
@@ -139,6 +143,82 @@ func renderTokenUsageRows(report TokenUsageReport, opts RenderOptions) []string 
 		tokenUsageGraph(aggregateGraph, aggregateGraph, opts),
 	))
 	return lines
+}
+
+func renderTokenUsageTimeChart(report TokenUsageReport, opts RenderOptions) []string {
+	const (
+		chartHeight = 6
+		dayWidth    = 4
+		labelWidth  = 7
+	)
+
+	if len(report.Days) == 0 {
+		return nil
+	}
+
+	maxGraph := int64(0)
+	for _, day := range report.Days {
+		if day.Graph > maxGraph {
+			maxGraph = day.Graph
+		}
+	}
+
+	title := titleCaseASCII(report.Metric) + "/day graph"
+	lines := []string{colorize(title, "1;37", opts.Color)}
+	if maxGraph <= 0 {
+		lines = append(lines, "no token usage in range")
+		return lines
+	}
+
+	for row := chartHeight; row >= 1; row-- {
+		threshold := int64(float64(maxGraph) * float64(row) / float64(chartHeight))
+		if threshold <= 0 {
+			threshold = 1
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%*s |", labelWidth, formatTokenCount(threshold))
+		for _, day := range report.Days {
+			cell := strings.Repeat(" ", dayWidth)
+			if day.Graph >= threshold {
+				cell = strings.Repeat("#", dayWidth-1) + " "
+				if opts.Color {
+					cell = colorize(strings.Repeat("#", dayWidth-1), "32", true) + " "
+				}
+			}
+			b.WriteString(cell)
+		}
+		lines = append(lines, b.String())
+	}
+
+	lines = append(lines, fmt.Sprintf(
+		"%*s +%s",
+		labelWidth,
+		"",
+		strings.Repeat("-", len(report.Days)*dayWidth),
+	))
+
+	var labels strings.Builder
+	fmt.Fprintf(&labels, "%*s  ", labelWidth, "")
+	for _, day := range report.Days {
+		labels.WriteString(fmt.Sprintf("%*s ", dayWidth-1, dayLabel(day.Date)))
+	}
+	lines = append(lines, labels.String())
+	return lines
+}
+
+func dayLabel(date string) string {
+	if len(date) >= 10 {
+		return date[8:10]
+	}
+	return date
+}
+
+func titleCaseASCII(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
 }
 
 func tokenUsageGraph(value int64, maxValue int64, opts RenderOptions) string {
