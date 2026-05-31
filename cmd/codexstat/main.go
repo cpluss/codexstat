@@ -12,7 +12,7 @@ import (
 	"codexstat/internal/codex"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 func main() {
 	args := os.Args[1:]
@@ -110,6 +110,18 @@ func runNow(args []string) {
 				snapshot.Warnings = append(snapshot.Warnings, "history write failed: "+err.Error())
 			}
 		}
+	}
+
+	tokenUsage, err := codex.BuildTokenUsageReport(codex.TokenUsageQuery{
+		Days:      codex.DefaultTokenUsageDays,
+		Metric:    "tokens",
+		Now:       time.Now(),
+		CodexHome: *codexHome,
+	})
+	if err != nil {
+		snapshot.Warnings = append(snapshot.Warnings, "token usage unavailable: "+err.Error())
+	} else {
+		snapshot.TokenUsage = &tokenUsage
 	}
 
 	if *jsonFlag {

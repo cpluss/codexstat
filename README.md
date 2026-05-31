@@ -33,7 +33,9 @@ go build ./cmd/codexstat
 
 The default source is `auto`: OAuth first, then local `codex app-server` if OAuth is unavailable.
 
-`codexstat history` defaults to token totals. It scans:
+The main `codexstat` output always includes a 7-day token usage table. The same data is also included in `--json` output under `token_usage`.
+
+`codexstat history` is the focused token-history view and defaults to token totals. It scans:
 
 - `~/.codex/sessions/YYYY/MM/DD/*.jsonl`
 - `~/.codex/archived_sessions/*.jsonl`

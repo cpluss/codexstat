@@ -40,15 +40,16 @@ type Options struct {
 }
 
 type Snapshot struct {
-	Provider  string        `json:"provider"`
-	Source    Source        `json:"source"`
-	UpdatedAt time.Time     `json:"updated_at"`
-	Account   *Account      `json:"account,omitempty"`
-	Session   *Window       `json:"session,omitempty"`
-	Weekly    *Window       `json:"weekly,omitempty"`
-	Extra     []NamedWindow `json:"extra_rate_windows,omitempty"`
-	Credits   *Credits      `json:"credits,omitempty"`
-	Warnings  []string      `json:"warnings,omitempty"`
+	Provider   string            `json:"provider"`
+	Source     Source            `json:"source"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+	Account    *Account          `json:"account,omitempty"`
+	Session    *Window           `json:"session,omitempty"`
+	Weekly     *Window           `json:"weekly,omitempty"`
+	Extra      []NamedWindow     `json:"extra_rate_windows,omitempty"`
+	Credits    *Credits          `json:"credits,omitempty"`
+	TokenUsage *TokenUsageReport `json:"token_usage,omitempty"`
+	Warnings   []string          `json:"warnings,omitempty"`
 }
 
 type Account struct {

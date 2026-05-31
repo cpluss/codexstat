@@ -22,6 +22,8 @@ type TokenUsageQuery struct {
 	Env       map[string]string
 }
 
+const DefaultTokenUsageDays = 7
+
 type TokenUsageReport struct {
 	Metric        string          `json:"metric"`
 	Since         string          `json:"since"`
@@ -64,7 +66,7 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 		return TokenUsageReport{}, fmt.Errorf("unknown token metric %q", query.Metric)
 	}
 	if query.Days <= 0 {
-		query.Days = 7
+		query.Days = DefaultTokenUsageDays
 	}
 	if query.Now.IsZero() {
 		query.Now = time.Now()

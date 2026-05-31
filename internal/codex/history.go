@@ -40,6 +40,29 @@ func RenderTokenUsage(report TokenUsageReport, opts RenderOptions) string {
 	}
 	lines = append(lines, "")
 
+	lines = append(lines, renderTokenUsageRows(report, opts)...)
+	return strings.Join(lines, "\n")
+}
+
+func renderTokenUsageInline(report TokenUsageReport, opts RenderOptions) []string {
+	title := fmt.Sprintf("Token usage (%s..%s)", report.Since, report.Until)
+	lines := []string{
+		colorize(title, "1;36", opts.Color),
+		strings.Repeat("-", len(title)),
+		fmt.Sprintf(
+			"metric %s | files %d | events %d | total %s",
+			report.Metric,
+			report.FilesScanned,
+			report.EventsScanned,
+			formatTokenCount(report.Total.Total),
+		),
+	}
+	lines = append(lines, renderTokenUsageRows(report, opts)...)
+	return lines
+}
+
+func renderTokenUsageRows(report TokenUsageReport, opts RenderOptions) []string {
+	var lines []string
 	header := fmt.Sprintf(
 		"%-10s  %8s  %8s  %9s  %9s  %9s  %9s  %9s  %s",
 		"Date",
@@ -86,7 +109,7 @@ func RenderTokenUsage(report TokenUsageReport, opts RenderOptions) string {
 			tokenUsageGraph(day.Graph, maxGraph, opts),
 		))
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 func tokenUsageGraph(value int64, maxValue int64, opts RenderOptions) string {

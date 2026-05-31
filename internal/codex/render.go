@@ -24,6 +24,11 @@ func RenderText(snapshot *Snapshot, opts RenderOptions) string {
 		lines = append(lines, "")
 	}
 
+	if snapshot.TokenUsage != nil {
+		lines = append(lines, renderTokenUsageInline(*snapshot.TokenUsage, opts)...)
+		lines = append(lines, "")
+	}
+
 	lines = append(lines, renderDetails(snapshot)...)
 	for _, warning := range snapshot.Warnings {
 		lines = append(lines, "Warning: "+warning)
