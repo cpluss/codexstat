@@ -48,7 +48,7 @@ type Snapshot struct {
 	Weekly     *Window           `json:"weekly,omitempty"`
 	Extra      []NamedWindow     `json:"extra_rate_windows,omitempty"`
 	Credits    *Credits          `json:"credits,omitempty"`
-	TokenUsage *TokenUsageReport `json:"token_usage,omitempty"`
+	TokenUsage *TokenUsageReport `json:"token_usage"`
 	Warnings   []string          `json:"warnings,omitempty"`
 }
 

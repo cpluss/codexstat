@@ -65,6 +65,8 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 	if !IsTokenHistoryMetric(metric) {
 		return TokenUsageReport{}, fmt.Errorf("unknown token metric %q", query.Metric)
 	}
+	query.Metric = metric
+	empty := EmptyTokenUsageReport(query)
 	if query.Days <= 0 {
 		query.Days = DefaultTokenUsageDays
 	}
@@ -92,11 +94,12 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 
 	roots, err := codexSessionRoots(query)
 	if err != nil {
-		return TokenUsageReport{}, err
+		return empty, err
 	}
 	files, err := listCodexTokenFiles(roots, scanSince, scanUntil)
 	if err != nil {
-		return TokenUsageReport{}, err
+		empty.Roots = roots
+		return empty, err
 	}
 
 	seenBase := make(map[string]bool)
@@ -110,7 +113,8 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 		seenBase[base] = true
 		fileEvents, err := scanCodexTokenFile(file, since, until, dayMap)
 		if err != nil {
-			return TokenUsageReport{}, err
+			empty.Roots = roots
+			return empty, err
 		}
 		if fileEvents > 0 {
 			filesScanned++
@@ -145,6 +149,32 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 		Total:         total,
 		Days:          days,
 	}, nil
+}
+
+func EmptyTokenUsageReport(query TokenUsageQuery) TokenUsageReport {
+	metric := normalizeTokenMetric(query.Metric)
+	if !IsTokenHistoryMetric(metric) {
+		metric = "tokens"
+	}
+	if query.Days <= 0 {
+		query.Days = DefaultTokenUsageDays
+	}
+	if query.Now.IsZero() {
+		query.Now = time.Now()
+	}
+	today := startOfLocalDay(query.Now.Local())
+	since := today.AddDate(0, 0, -(query.Days - 1))
+	until := today.AddDate(0, 0, 1)
+	days := make([]TokenUsageDay, 0, query.Days)
+	for day := since; day.Before(until); day = day.AddDate(0, 0, 1) {
+		days = append(days, TokenUsageDay{Date: day.Format("2006-01-02")})
+	}
+	return TokenUsageReport{
+		Metric: metric,
+		Since:  since.Format("2006-01-02"),
+		Until:  until.AddDate(0, 0, -1).Format("2006-01-02"),
+		Days:   days,
+	}
 }
 
 type tokenUsageDayBuilder struct {

@@ -12,7 +12,7 @@ import (
 	"codexstat/internal/codex"
 )
 
-const version = "0.4.0"
+const version = "0.4.1"
 
 func main() {
 	args := os.Args[1:]
@@ -120,9 +120,15 @@ func runNow(args []string) {
 	})
 	if err != nil {
 		snapshot.Warnings = append(snapshot.Warnings, "token usage unavailable: "+err.Error())
+		tokenUsage = codex.EmptyTokenUsageReport(codex.TokenUsageQuery{
+			Days:      codex.DefaultTokenUsageDays,
+			Metric:    "tokens",
+			Now:       time.Now(),
+			CodexHome: *codexHome,
+		})
 	} else {
-		snapshot.TokenUsage = &tokenUsage
 	}
+	snapshot.TokenUsage = &tokenUsage
 
 	if *jsonFlag {
 		enc := json.NewEncoder(os.Stdout)

@@ -111,4 +111,21 @@ func TestRenderTokenUsageShowsDayOverDayGraph(t *testing.T) {
 	if !strings.Contains(out, "[####################] 2K") {
 		t.Fatalf("missing full-width graph:\n%s", out)
 	}
+	if !strings.Contains(out, "Aggregate") {
+		t.Fatalf("missing aggregate row:\n%s", out)
+	}
+}
+
+func TestEmptyTokenUsageReportIncludesDayBuckets(t *testing.T) {
+	report := EmptyTokenUsageReport(TokenUsageQuery{
+		Days:   3,
+		Metric: "tokens",
+		Now:    time.Date(2026, 5, 31, 12, 0, 0, 0, time.Local),
+	})
+	if report.Metric != "tokens" || report.Since != "2026-05-29" || report.Until != "2026-05-31" {
+		t.Fatalf("unexpected report bounds: %#v", report)
+	}
+	if len(report.Days) != 3 {
+		t.Fatalf("got %d days, want 3", len(report.Days))
+	}
 }

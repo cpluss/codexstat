@@ -95,7 +95,11 @@ func renderTokenUsageRows(report TokenUsageReport, opts RenderOptions) []string 
 			maxGraph = day.Graph
 		}
 	}
+	totalSessions := 0
+	totalEvents := 0
 	for _, day := range report.Days {
+		totalSessions += day.Sessions
+		totalEvents += day.Events
 		lines = append(lines, fmt.Sprintf(
 			"%-10s  %8d  %8d  %9s  %9s  %9s  %9s  %9s  %s",
 			day.Date,
@@ -109,6 +113,31 @@ func renderTokenUsageRows(report TokenUsageReport, opts RenderOptions) []string 
 			tokenUsageGraph(day.Graph, maxGraph, opts),
 		))
 	}
+	aggregateGraph := tokenMetricValue(report.Total, report.Metric)
+	lines = append(lines, fmt.Sprintf(
+		"%-10s  %8s  %8s  %9s  %9s  %9s  %9s  %9s  %s",
+		"----------",
+		"--------",
+		"--------",
+		"---------",
+		"---------",
+		"---------",
+		"---------",
+		"---------",
+		"--------------------",
+	))
+	lines = append(lines, fmt.Sprintf(
+		"%-10s  %8d  %8d  %9s  %9s  %9s  %9s  %9s  %s",
+		"Aggregate",
+		totalSessions,
+		totalEvents,
+		formatTokenCount(report.Total.Input),
+		formatTokenCount(report.Total.Cached),
+		formatTokenCount(report.Total.Output),
+		formatTokenCount(report.Total.Reasoning),
+		formatTokenCount(report.Total.Total),
+		tokenUsageGraph(aggregateGraph, aggregateGraph, opts),
+	))
 	return lines
 }
 

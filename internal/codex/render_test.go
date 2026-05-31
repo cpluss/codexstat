@@ -33,4 +33,7 @@ func TestRenderTextIncludesTokenUsage(t *testing.T) {
 	if !strings.Contains(out, "[####################] 1.2K") {
 		t.Fatalf("missing token graph:\n%s", out)
 	}
+	if !strings.Contains(out, "Aggregate") {
+		t.Fatalf("missing aggregate row:\n%s", out)
+	}
 }
