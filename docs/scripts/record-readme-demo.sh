@@ -9,7 +9,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TUI_DEMO="$SCRIPT_DIR/tui-demo"
 OUTPUT_DIR="$REPO_ROOT/docs/images"
 OUTPUT="$OUTPUT_DIR/codexstat-demo.gif"
 
@@ -28,6 +27,16 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$OUTPUT_DIR" "$DEMO_HOME" "$DEMO_BIN_DIR"
+
+if ! command -v asciinema >/dev/null 2>&1; then
+	echo "Error: asciinema not found. Install with: brew install asciinema" >&2
+	exit 1
+fi
+
+if ! command -v agg >/dev/null 2>&1; then
+	echo "Error: agg not found. Install with: cargo install --git https://github.com/asciinema/agg agg" >&2
+	exit 1
+fi
 
 python3 - "$DEMO_HOME" <<'PY'
 import json
@@ -173,14 +182,35 @@ export CODEXSTAT_HISTORY="$WORK_DIR/history.jsonl"
 export PATH="$DEMO_BIN_DIR:$PATH"
 unset NO_COLOR
 
-"$TUI_DEMO" \
-	-o "$OUTPUT" \
-	--cols 118 \
-	--rows 34 \
-	--theme dracula \
+CAST_FILE="${OUTPUT%.gif}.cast"
+DEMO_SCRIPT="$WORK_DIR/run-demo.sh"
+
+cat > "$DEMO_SCRIPT" <<'SH'
+#!/bin/bash
+set -euo pipefail
+sleep 0.1
+printf '\033[?25l\033[2J\033[H'
+codexstat --source oauth --no-record
+sleep 2.5
+SH
+chmod +x "$DEMO_SCRIPT"
+
+echo "Recording codexstat output to $OUTPUT..."
+echo "Terminal: 118x34"
+
+asciinema rec "$CAST_FILE" \
+	--window-size "118x34" \
+	--overwrite \
+	-c "bash '$DEMO_SCRIPT'"
+
+echo "Converting to GIF..."
+
+agg "$CAST_FILE" "$OUTPUT" \
+	--font-family "JetBrains Mono,Menlo,Monaco,monospace" \
 	--font-size 11 \
-	--typing-speed 0.03 \
-	--pause 2.5 \
-	-- "codexstat --source oauth --no-record"
+	--theme dracula \
+	--speed 1
+
+rm -f "$CAST_FILE"
 
 echo "Recorded $OUTPUT"
