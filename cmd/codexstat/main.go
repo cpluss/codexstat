@@ -12,7 +12,7 @@ import (
 	"codexstat/internal/codex"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	args := os.Args[1:]
@@ -21,8 +21,15 @@ func main() {
 		case "history", "hist":
 			runHistory(args[1:])
 			return
+		case "tokens", "token":
+			runHistory(append([]string{"--metric", "tokens"}, args[1:]...))
+			return
 		case "help":
 			if len(args) > 1 && (args[1] == "history" || args[1] == "hist") {
+				runHistory([]string{"-h"})
+				return
+			}
+			if len(args) > 1 && (args[1] == "tokens" || args[1] == "token") {
 				runHistory([]string{"-h"})
 				return
 			}
@@ -125,14 +132,41 @@ func runHistory(args []string) {
 	flags := historyFlagSet()
 	var (
 		days        = flags.Int("days", 7, "number of days to show")
-		metric      = flags.String("metric", "weekly", "graph metric: weekly or session")
-		historyFile = flags.String("history-file", "", "history JSONL file path")
+		metric      = flags.String("metric", "tokens", "graph metric: tokens, input, cached, output, reasoning, weekly, or session")
+		codexHome   = flags.String("codex-home", "", "Codex home directory containing sessions and archived_sessions")
+		historyFile = flags.String("history-file", "", "quota snapshot history JSONL file path")
 		jsonFlag    = flags.Bool("json", false, "print JSON instead of text")
 		prettyFlag  = flags.Bool("pretty", false, "pretty-print JSON output")
 		noColor     = flags.Bool("no-color", false, "disable ANSI color in text output")
 	)
 	if err := flags.Parse(args); err != nil {
 		exitErr(err, 2)
+	}
+
+	if codex.IsTokenHistoryMetric(*metric) {
+		report, err := codex.BuildTokenUsageReport(codex.TokenUsageQuery{
+			Days:      *days,
+			Metric:    *metric,
+			Now:       time.Now(),
+			CodexHome: *codexHome,
+		})
+		if err != nil {
+			exitErr(err, 1)
+		}
+		if *jsonFlag {
+			enc := json.NewEncoder(os.Stdout)
+			if *prettyFlag {
+				enc.SetIndent("", "  ")
+			}
+			if err := enc.Encode(report); err != nil {
+				exitErr(err, 1)
+			}
+			return
+		}
+		fmt.Println(codex.RenderTokenUsage(report, codex.RenderOptions{
+			Color: shouldUseColor(*noColor),
+		}))
+		return
 	}
 
 	path := *historyFile
@@ -178,7 +212,7 @@ func historyFlagSet() *flag.FlagSet {
 	flags := flag.NewFlagSet("codexstat history", flag.ExitOnError)
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), "Usage: %s history [flags]\n\n", os.Args[0])
-		fmt.Fprintln(flags.Output(), "Print daily usage history from recorded codexstat samples.")
+		fmt.Fprintln(flags.Output(), "Print day-over-day token usage from Codex session logs.")
 		fmt.Fprintln(flags.Output(), "\nFlags:")
 		flags.PrintDefaults()
 	}

@@ -21,6 +21,103 @@ type HistoryRecord struct {
 	Snapshot   Snapshot  `json:"snapshot"`
 }
 
+func RenderTokenUsage(report TokenUsageReport, opts RenderOptions) string {
+	var lines []string
+	title := "Codex token usage"
+	lines = append(lines, colorize(title, "1;36", opts.Color))
+	lines = append(lines, strings.Repeat("-", len(title)))
+	lines = append(lines, fmt.Sprintf(
+		"range %s..%s | metric %s | files %d | events %d | total %s",
+		report.Since,
+		report.Until,
+		report.Metric,
+		report.FilesScanned,
+		report.EventsScanned,
+		formatTokenCount(report.Total.Total),
+	))
+	if len(report.Roots) > 0 {
+		lines = append(lines, "roots "+strings.Join(report.Roots, ", "))
+	}
+	lines = append(lines, "")
+
+	header := fmt.Sprintf(
+		"%-10s  %8s  %8s  %9s  %9s  %9s  %9s  %9s  %s",
+		"Date",
+		"Sessions",
+		"Events",
+		"Input",
+		"Cached",
+		"Output",
+		"Reason",
+		"Total",
+		"Graph",
+	)
+	lines = append(lines, colorize(header, "1;37", opts.Color))
+	lines = append(lines, fmt.Sprintf(
+		"%-10s  %8s  %8s  %9s  %9s  %9s  %9s  %9s  %s",
+		"----------",
+		"--------",
+		"--------",
+		"---------",
+		"---------",
+		"---------",
+		"---------",
+		"---------",
+		"--------------------",
+	))
+
+	maxGraph := int64(0)
+	for _, day := range report.Days {
+		if day.Graph > maxGraph {
+			maxGraph = day.Graph
+		}
+	}
+	for _, day := range report.Days {
+		lines = append(lines, fmt.Sprintf(
+			"%-10s  %8d  %8d  %9s  %9s  %9s  %9s  %9s  %s",
+			day.Date,
+			day.Sessions,
+			day.Events,
+			formatTokenCount(day.Tokens.Input),
+			formatTokenCount(day.Tokens.Cached),
+			formatTokenCount(day.Tokens.Output),
+			formatTokenCount(day.Tokens.Reasoning),
+			formatTokenCount(day.Tokens.Total),
+			tokenUsageGraph(day.Graph, maxGraph, opts),
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func tokenUsageGraph(value int64, maxValue int64, opts RenderOptions) string {
+	if value <= 0 || maxValue <= 0 {
+		return "[--------------------] -"
+	}
+	percent := float64(value) / float64(maxValue) * 100
+	bar := usageBar(percent, 20)
+	if opts.Color {
+		bar = colorize(bar, "32", true)
+	}
+	return bar + " " + formatTokenCount(value)
+}
+
+func formatTokenCount(value int64) string {
+	switch {
+	case value >= 1_000_000_000:
+		return trimFloat(float64(value)/1_000_000_000) + "B"
+	case value >= 1_000_000:
+		return trimFloat(float64(value)/1_000_000) + "M"
+	case value >= 1_000:
+		return trimFloat(float64(value)/1_000) + "K"
+	default:
+		return fmt.Sprintf("%d", value)
+	}
+}
+
+func trimFloat(value float64) string {
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.1f", value), "0"), ".")
+}
+
 type HistoryQuery struct {
 	Days   int       `json:"days"`
 	Metric string    `json:"metric"`
@@ -171,7 +268,7 @@ func BuildHistoryReport(records []HistoryRecord, query HistoryQuery) (HistoryRep
 		metric = "weekly"
 	}
 	if metric != "weekly" && metric != "session" {
-		return HistoryReport{}, fmt.Errorf("unknown history metric %q; expected weekly or session", query.Metric)
+		return HistoryReport{}, fmt.Errorf("unknown quota history metric %q; expected weekly or session", query.Metric)
 	}
 	if query.Days <= 0 {
 		query.Days = 7
@@ -281,7 +378,7 @@ func firstFloatPtr(values ...*float64) *float64 {
 
 func RenderHistory(report HistoryReport, opts RenderOptions) string {
 	var lines []string
-	title := "Codex history"
+	title := "Codex quota history"
 	lines = append(lines, colorize(title, "1;36", opts.Color))
 	lines = append(lines, strings.Repeat("-", len(title)))
 	lines = append(lines, fmt.Sprintf(
