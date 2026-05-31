@@ -6,22 +6,123 @@ import (
 	"time"
 )
 
-func RenderText(snapshot *Snapshot) string {
-	var lines []string
-	header := "Codex"
-	if snapshot.Source != "" {
-		header += " (" + string(snapshot.Source) + ")"
-	}
-	lines = append(lines, "== "+header+" ==")
+type RenderOptions struct {
+	Color bool
+}
 
+func RenderText(snapshot *Snapshot, opts RenderOptions) string {
+	var lines []string
+	title := "Codex stats"
+	lines = append(lines, colorize(title, "1;36", opts.Color))
+	lines = append(lines, strings.Repeat("-", len(title)))
+	lines = append(lines, summaryLine(snapshot))
+	lines = append(lines, "")
+
+	rows := usageRows(snapshot)
+	if len(rows) > 0 {
+		lines = append(lines, renderUsageTable(rows, opts)...)
+		lines = append(lines, "")
+	}
+
+	lines = append(lines, renderDetails(snapshot)...)
+	for _, warning := range snapshot.Warnings {
+		lines = append(lines, "Warning: "+warning)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func usageRows(snapshot *Snapshot) []usageRow {
+	var rows []usageRow
 	if snapshot.Session != nil {
-		lines = appendWindow(lines, "Session", *snapshot.Session)
+		rows = append(rows, usageRow{Title: "Session", Window: *snapshot.Session})
 	}
 	if snapshot.Weekly != nil {
-		lines = appendWindow(lines, "Weekly", *snapshot.Weekly)
+		rows = append(rows, usageRow{Title: "Weekly", Window: *snapshot.Weekly})
 	}
 	for _, extra := range snapshot.Extra {
-		lines = appendWindow(lines, extra.Title, extra.Window)
+		rows = append(rows, usageRow{Title: extra.Title, Window: extra.Window})
+	}
+	return rows
+}
+
+type usageRow struct {
+	Title  string
+	Window Window
+}
+
+func renderUsageTable(rows []usageRow, opts RenderOptions) []string {
+	titleWidth := len("Window")
+	resetWidth := len("Reset")
+	renderedRows := make([]struct {
+		usageRow
+		reset string
+	}, 0, len(rows))
+	for _, row := range rows {
+		if len(row.Title) > titleWidth {
+			titleWidth = len(row.Title)
+		}
+		reset := "-"
+		if row.Window.ResetsAt != nil {
+			reset = row.Window.ResetIn + " (" + row.Window.ResetsAt.Local().Format("Jan 02 15:04 MST") + ")"
+		}
+		if len(reset) > resetWidth {
+			resetWidth = len(reset)
+		}
+		renderedRows = append(renderedRows, struct {
+			usageRow
+			reset string
+		}{usageRow: row, reset: reset})
+	}
+
+	header := fmt.Sprintf(
+		"%-*s  %6s  %6s  %-*s  %s",
+		titleWidth,
+		"Window",
+		"Used",
+		"Left",
+		resetWidth,
+		"Reset",
+		"Usage",
+	)
+	lines := []string{
+		colorize(header, "1;37", opts.Color),
+		fmt.Sprintf(
+			"%-*s  %6s  %6s  %-*s  %s",
+			titleWidth,
+			strings.Repeat("-", titleWidth),
+			"------",
+			"------",
+			resetWidth,
+			strings.Repeat("-", resetWidth),
+			"--------------------",
+		),
+	}
+
+	for _, row := range renderedRows {
+		bar := usageBar(row.Window.UsedPercent, 20)
+		if opts.Color {
+			bar = colorizeBar(bar, row.Window.RemainingPercent)
+		}
+		lines = append(lines, fmt.Sprintf(
+			"%-*s  %6s  %6s  %-*s  %s",
+			titleWidth,
+			row.Title,
+			formatPercent(row.Window.UsedPercent),
+			formatPercent(row.Window.RemainingPercent),
+			resetWidth,
+			row.reset,
+			bar,
+		))
+	}
+	return lines
+}
+
+func renderDetails(snapshot *Snapshot) []string {
+	var lines []string
+	lines = append(lines, "Details")
+	lines = append(lines, "-------")
+	if snapshot.Source != "" {
+		lines = append(lines, "Source: "+string(snapshot.Source))
 	}
 	if snapshot.Credits != nil {
 		lines = append(lines, "Credits: "+formatCredits(*snapshot.Credits))
@@ -37,38 +138,42 @@ func RenderText(snapshot *Snapshot) string {
 			lines = append(lines, "Account ID: "+snapshot.Account.AccountID)
 		}
 	}
-	for _, warning := range snapshot.Warnings {
-		lines = append(lines, "Warning: "+warning)
-	}
 	lines = append(lines, "Updated: "+snapshot.UpdatedAt.Local().Format("2006-01-02 15:04:05 MST"))
-	return strings.Join(lines, "\n")
-}
-
-func appendWindow(lines []string, title string, window Window) []string {
-	lines = append(lines, fmt.Sprintf(
-		"%s: %s left (%s used) %s",
-		title,
-		formatPercent(window.RemainingPercent),
-		formatPercent(window.UsedPercent),
-		usageBar(window.RemainingPercent),
-	))
-	if window.ResetsAt != nil {
-		lines = append(lines, "  resets "+window.ResetIn+" at "+window.ResetsAt.Local().Format("2006-01-02 15:04 MST"))
-	}
 	return lines
 }
 
-func usageBar(remaining float64) string {
-	const width = 12
-	remaining = clamp(remaining, 0, 100)
-	filled := int((remaining / 100) * width)
+func summaryLine(snapshot *Snapshot) string {
+	parts := []string{}
+	if snapshot.Source != "" {
+		parts = append(parts, "source "+string(snapshot.Source))
+	}
+	if snapshot.Account != nil && snapshot.Account.Email != "" {
+		parts = append(parts, snapshot.Account.Email)
+	}
+	if snapshot.Account != nil && snapshot.Account.Plan != "" {
+		parts = append(parts, displayPlan(snapshot.Account.Plan))
+	}
+	if snapshot.UpdatedAt.IsZero() {
+		parts = append(parts, "updated unknown")
+	} else {
+		parts = append(parts, "updated "+snapshot.UpdatedAt.Local().Format("Jan 02 15:04 MST"))
+	}
+	return strings.Join(parts, " | ")
+}
+
+func usageBar(percent float64, width int) string {
+	percent = clamp(percent, 0, 100)
+	filled := int((percent / 100) * float64(width))
 	if filled < 0 {
 		filled = 0
 	}
 	if filled > width {
 		filled = width
 	}
-	return "[" + strings.Repeat("=", filled) + strings.Repeat("-", width-filled) + "]"
+	if percent > 0 && filled == 0 {
+		filled = 1
+	}
+	return "[" + strings.Repeat("#", filled) + strings.Repeat("-", width-filled) + "]"
 }
 
 func formatPercent(value float64) string {
@@ -89,6 +194,24 @@ func formatCredits(credits Credits) string {
 		return "not available"
 	}
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", *credits.Balance), "0"), ".")
+}
+
+func colorize(text, code string, enabled bool) string {
+	if !enabled {
+		return text
+	}
+	return "\x1b[" + code + "m" + text + "\x1b[0m"
+}
+
+func colorizeBar(bar string, remainingPercent float64) string {
+	switch {
+	case remainingPercent < 10:
+		return colorize(bar, "31", true)
+	case remainingPercent < 25:
+		return colorize(bar, "33", true)
+	default:
+		return colorize(bar, "32", true)
+	}
 }
 
 func displayPlan(plan string) string {

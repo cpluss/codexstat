@@ -6,32 +6,64 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"codexstat/internal/codex"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
+	args := os.Args[1:]
+	if len(args) > 0 {
+		switch args[0] {
+		case "history", "hist":
+			runHistory(args[1:])
+			return
+		case "help":
+			if len(args) > 1 && (args[1] == "history" || args[1] == "hist") {
+				runHistory([]string{"-h"})
+				return
+			}
+			runNow([]string{"-h"})
+			return
+		}
+	}
+
+	runNow(args)
+}
+
+func runNow(args []string) {
+	if len(args) > 0 && args[0] == "now" {
+		args = args[1:]
+	}
+
+	flags := flag.NewFlagSet("codexstat", flag.ExitOnError)
 	var (
-		sourceFlag = flag.String("source", "auto", "data source: auto, oauth, or cli")
-		jsonFlag   = flag.Bool("json", false, "print JSON instead of text")
-		prettyFlag = flag.Bool("pretty", false, "pretty-print JSON output")
-		noRefresh  = flag.Bool("no-refresh", false, "do not refresh stale OAuth tokens")
-		codexHome  = flag.String("codex-home", "", "Codex home directory containing auth.json and config.toml")
-		codexBin   = flag.String("codex-bin", "codex", "codex executable path or name for CLI fallback")
-		timeout    = flag.Duration("timeout", 15*time.Second, "overall fetch timeout")
-		showVer    = flag.Bool("version", false, "print version and exit")
+		sourceFlag  = flags.String("source", "auto", "data source: auto, oauth, or cli")
+		jsonFlag    = flags.Bool("json", false, "print JSON instead of text")
+		prettyFlag  = flags.Bool("pretty", false, "pretty-print JSON output")
+		noRefresh   = flags.Bool("no-refresh", false, "do not refresh stale OAuth tokens")
+		codexHome   = flags.String("codex-home", "", "Codex home directory containing auth.json and config.toml")
+		codexBin    = flags.String("codex-bin", "codex", "codex executable path or name for CLI fallback")
+		timeout     = flags.Duration("timeout", 15*time.Second, "overall fetch timeout")
+		historyFile = flags.String("history-file", "", "history JSONL file path")
+		noRecord    = flags.Bool("no-record", false, "do not append this fetch to history")
+		noColor     = flags.Bool("no-color", false, "disable ANSI color in text output")
+		showVer     = flags.Bool("version", false, "print version and exit")
 	)
 
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags]\n\n", os.Args[0])
-		fmt.Fprintln(flag.CommandLine.Output(), "Print current Codex account, credit, and rate-limit stats.")
-		fmt.Fprintln(flag.CommandLine.Output(), "\nFlags:")
-		flag.PrintDefaults()
+	flags.Usage = func() {
+		fmt.Fprintf(flags.Output(), "Usage: %s [flags]\n", os.Args[0])
+		fmt.Fprintf(flags.Output(), "       %s history [flags]\n\n", os.Args[0])
+		fmt.Fprintln(flags.Output(), "Print current Codex account, credit, and rate-limit stats.")
+		fmt.Fprintln(flags.Output(), "\nFlags:")
+		flags.PrintDefaults()
 	}
-	flag.Parse()
+	if err := flags.Parse(args); err != nil {
+		exitErr(err, 2)
+	}
 
 	if *showVer {
 		fmt.Println(version)
@@ -40,8 +72,7 @@ func main() {
 
 	source, err := codex.ParseSource(*sourceFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "codexstat:", err)
-		os.Exit(2)
+		exitErr(err, 2)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
@@ -55,8 +86,23 @@ func main() {
 		NoRefresh: *noRefresh,
 	})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "codexstat:", err)
-		os.Exit(1)
+		exitErr(err, 1)
+	}
+
+	if !*noRecord {
+		path := *historyFile
+		if path == "" {
+			var pathErr error
+			path, pathErr = codex.DefaultHistoryPath(nil)
+			if pathErr != nil {
+				snapshot.Warnings = append(snapshot.Warnings, "history path unavailable: "+pathErr.Error())
+			}
+		}
+		if path != "" {
+			if err := codex.RecordSnapshot(path, snapshot); err != nil {
+				snapshot.Warnings = append(snapshot.Warnings, "history write failed: "+err.Error())
+			}
+		}
 	}
 
 	if *jsonFlag {
@@ -65,11 +111,92 @@ func main() {
 			enc.SetIndent("", "  ")
 		}
 		if err := enc.Encode(snapshot); err != nil {
-			fmt.Fprintln(os.Stderr, "codexstat:", err)
-			os.Exit(1)
+			exitErr(err, 1)
 		}
 		return
 	}
 
-	fmt.Println(codex.RenderText(snapshot))
+	fmt.Println(codex.RenderText(snapshot, codex.RenderOptions{
+		Color: shouldUseColor(*noColor),
+	}))
+}
+
+func runHistory(args []string) {
+	flags := historyFlagSet()
+	var (
+		days        = flags.Int("days", 7, "number of days to show")
+		metric      = flags.String("metric", "weekly", "graph metric: weekly or session")
+		historyFile = flags.String("history-file", "", "history JSONL file path")
+		jsonFlag    = flags.Bool("json", false, "print JSON instead of text")
+		prettyFlag  = flags.Bool("pretty", false, "pretty-print JSON output")
+		noColor     = flags.Bool("no-color", false, "disable ANSI color in text output")
+	)
+	if err := flags.Parse(args); err != nil {
+		exitErr(err, 2)
+	}
+
+	path := *historyFile
+	if path == "" {
+		var err error
+		path, err = codex.DefaultHistoryPath(nil)
+		if err != nil {
+			exitErr(err, 1)
+		}
+	}
+
+	records, err := codex.LoadHistory(path)
+	if err != nil {
+		exitErr(err, 1)
+	}
+	report, err := codex.BuildHistoryReport(records, codex.HistoryQuery{
+		Days:   *days,
+		Metric: *metric,
+		Now:    time.Now(),
+		Path:   path,
+	})
+	if err != nil {
+		exitErr(err, 2)
+	}
+
+	if *jsonFlag {
+		enc := json.NewEncoder(os.Stdout)
+		if *prettyFlag {
+			enc.SetIndent("", "  ")
+		}
+		if err := enc.Encode(report); err != nil {
+			exitErr(err, 1)
+		}
+		return
+	}
+
+	fmt.Println(codex.RenderHistory(report, codex.RenderOptions{
+		Color: shouldUseColor(*noColor),
+	}))
+}
+
+func historyFlagSet() *flag.FlagSet {
+	flags := flag.NewFlagSet("codexstat history", flag.ExitOnError)
+	flags.Usage = func() {
+		fmt.Fprintf(flags.Output(), "Usage: %s history [flags]\n\n", os.Args[0])
+		fmt.Fprintln(flags.Output(), "Print daily usage history from recorded codexstat samples.")
+		fmt.Fprintln(flags.Output(), "\nFlags:")
+		flags.PrintDefaults()
+	}
+	return flags
+}
+
+func shouldUseColor(noColor bool) bool {
+	if noColor {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
+		return false
+	}
+	info, err := os.Stdout.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+}
+
+func exitErr(err error, code int) {
+	fmt.Fprintln(os.Stderr, "codexstat:", err)
+	os.Exit(code)
 }
