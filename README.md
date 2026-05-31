@@ -2,7 +2,7 @@
 
 `codexstat` is a small Go CLI for printing current Codex stats and day-over-day token usage.
 
-It is intentionally narrower than CodexBar: it has no menu bar UI and no browser-dashboard scraping. The first implementation mirrors the low-friction CodexBar data paths:
+It is intentionally narrower than CodexBar: it has no menu bar UI and no browser-dashboard scraping. CodexBar deserves the credit for proving out the useful Codex usage surfaces; this project is a deliberately smaller terminal-first take that reuses the same low-friction data-path ideas where they make sense:
 
 - OAuth usage API from `~/.codex/auth.json` or `$CODEX_HOME/auth.json`
 - automatic OAuth token refresh after 8 days
