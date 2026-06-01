@@ -30,13 +30,14 @@ func ParseSource(value string) (Source, error) {
 }
 
 type Options struct {
-	Source     Source
-	CodexHome  string
-	CodexBin   string
-	Timeout    time.Duration
-	NoRefresh  bool
-	Env        map[string]string
-	HTTPClient *http.Client
+	Source        Source
+	CodexHome     string
+	CodexBin      string
+	ClientVersion string
+	Timeout       time.Duration
+	NoRefresh     bool
+	Env           map[string]string
+	HTTPClient    *http.Client
 }
 
 type Snapshot struct {
@@ -84,6 +85,9 @@ func normalizedOptions(opts Options) Options {
 	}
 	if opts.CodexBin == "" {
 		opts.CodexBin = "codex"
+	}
+	if strings.TrimSpace(opts.ClientVersion) == "" {
+		opts.ClientVersion = "dev"
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 15 * time.Second

@@ -1,4 +1,4 @@
-module codexstat
+module github.com/cpluss/codexstat
 
 go 1.26
 

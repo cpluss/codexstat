@@ -6,13 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
-	"codexstat/internal/codex"
+	"github.com/cpluss/codexstat/internal/codex"
 )
 
-const version = "0.4.3"
+var version = "dev"
 
 func main() {
 	args := os.Args[1:]
@@ -73,7 +74,7 @@ func runNow(args []string) {
 	}
 
 	if *showVer {
-		fmt.Println(version)
+		fmt.Println(versionString())
 		return
 	}
 
@@ -86,11 +87,12 @@ func runNow(args []string) {
 	defer cancel()
 
 	snapshot, err := codex.Fetch(ctx, codex.Options{
-		Source:    source,
-		CodexHome: *codexHome,
-		CodexBin:  *codexBin,
-		Timeout:   *timeout,
-		NoRefresh: *noRefresh,
+		Source:        source,
+		CodexHome:     *codexHome,
+		CodexBin:      *codexBin,
+		ClientVersion: versionString(),
+		Timeout:       *timeout,
+		NoRefresh:     *noRefresh,
 	})
 	if err != nil {
 		exitErr(err, 1)
@@ -236,6 +238,41 @@ func forceColorEnabled() bool {
 		}
 	}
 	return false
+}
+
+func versionString() string {
+	if trimmed := strings.TrimSpace(version); trimmed != "" && trimmed != "dev" {
+		return trimmed
+	}
+
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+
+	revision := ""
+	modified := false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			modified = setting.Value == "true"
+		}
+	}
+	if revision == "" {
+		return "dev"
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if modified {
+		return "dev (" + revision + "+modified)"
+	}
+	return "dev (" + revision + ")"
 }
 
 func writeJSON(value any, pretty bool) {

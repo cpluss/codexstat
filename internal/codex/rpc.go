@@ -47,13 +47,14 @@ func fetchCLI(ctx context.Context, opts Options) (*Snapshot, error) {
 }
 
 type rpcClient struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	lines   chan []byte
-	stderr  bytes.Buffer
-	nextID  int
-	waitErr chan error
-	once    sync.Once
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	lines         chan []byte
+	stderr        bytes.Buffer
+	clientVersion string
+	nextID        int
+	waitErr       chan error
+	once          sync.Once
 }
 
 func newRPCClient(ctx context.Context, opts Options) (*rpcClient, error) {
@@ -83,11 +84,12 @@ func newRPCClient(ctx context.Context, opts Options) (*rpcClient, error) {
 	}
 
 	client := &rpcClient{
-		cmd:     cmd,
-		stdin:   stdin,
-		lines:   make(chan []byte, 128),
-		nextID:  1,
-		waitErr: make(chan error, 1),
+		cmd:           cmd,
+		stdin:         stdin,
+		lines:         make(chan []byte, 128),
+		clientVersion: opts.ClientVersion,
+		nextID:        1,
+		waitErr:       make(chan error, 1),
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -130,7 +132,7 @@ func (c *rpcClient) initialize(ctx context.Context) error {
 	_, err := c.request(ctx, "initialize", map[string]any{
 		"clientInfo": map[string]string{
 			"name":    "codexstat",
-			"version": "0.1.0",
+			"version": strings.TrimSpace(c.clientVersion),
 		},
 	}, 8*time.Second)
 	if err != nil {
