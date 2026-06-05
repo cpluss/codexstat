@@ -2,13 +2,44 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_title: ${{ steps.meta.outputs.release_title }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - id: meta
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::12}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            {
+              echo "prerelease=false"
+              echo "release_tag=${GITHUB_REF_NAME}"
+              echo "release_title=${GITHUB_REF_NAME}"
+              echo "version=${GITHUB_REF_NAME}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "prerelease=true"
+              echo "release_tag=nightly"
+              echo "release_title=Nightly"
+              echo "version=nightly-${short_sha}"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -19,7 +50,9 @@ jobs:
       - run: go test ./...
 
   build:
-    needs: test
+    needs:
+      - prepare
+      - test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -43,7 +76,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -56,22 +89,56 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs:
+      - prepare
+      - build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          TAG: ${{ needs.prepare.outputs.release_tag }}
+          TITLE: ${{ needs.prepare.outputs.release_title }}
         run: |
           set -euo pipefail
           mkdir -p release
           find artifacts -name '*.tar.gz' -exec cp {} release/ \;
           cd release
           sha256sum *.tar.gz > checksums.txt
+
+          if [ "$PRERELEASE" = "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -f "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG" --force
+
+            notes_file="../release-notes.md"
+            {
+              echo "Automated build from ${GITHUB_SHA}."
+              echo
+              echo "Install with:"
+              echo
+              echo '```sh'
+              echo 'curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | CODEXSTAT_VERSION=main sh'
+              echo '```'
+            } > "$notes_file"
+
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" ./* --clobber
+              gh release edit "$TAG" --title "$TITLE" --notes-file "$notes_file" --prerelease --target "$GITHUB_SHA"
+            else
+              gh release create "$TAG" ./* --title "$TITLE" --notes-file "$notes_file" --prerelease --latest=false --target "$GITHUB_SHA"
+            fi
+            exit 0
+          fi
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" ./* --clobber
           else

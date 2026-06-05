@@ -16,14 +16,42 @@ var version = "dev"
 
 const liveSnapshotCacheMaxAge = 5 * time.Minute
 
+type command int
+
+const (
+	commandReport command = iota
+	commandUpdate
+	commandVersion
+)
+
+type cliOptions struct {
+	command       command
+	json          bool
+	updateVersion string
+}
+
 func main() {
 	run(os.Args[1:])
 }
 
 func run(args []string) {
-	jsonFlag, err := parseArgs(args)
+	opts, err := parseArgs(args)
 	if err != nil {
 		exitErr(err, 2)
+	}
+
+	switch opts.command {
+	case commandUpdate:
+		if err := selfUpdate(context.Background(), updateOptions{
+			Version: opts.updateVersion,
+			Stdout:  os.Stdout,
+		}); err != nil {
+			exitErr(err, 1)
+		}
+		return
+	case commandVersion:
+		fmt.Println(versionString())
+		return
 	}
 
 	timeout := 15 * time.Second
@@ -76,7 +104,7 @@ func run(args []string) {
 	finishProgress()
 	snapshot.TokenUsage = &tokenUsage
 
-	if jsonFlag {
+	if opts.json {
 		writeJSON(snapshot)
 		return
 	}
@@ -120,16 +148,30 @@ func loadOrFetchSnapshot(ctx context.Context, timeout time.Duration) (*codex.Sna
 	return snapshot, true, nil
 }
 
-func parseArgs(args []string) (bool, error) {
+func parseArgs(args []string) (cliOptions, error) {
 	switch len(args) {
 	case 0:
-		return false, nil
+		return cliOptions{command: commandReport}, nil
 	case 1:
 		if args[0] == "--json" {
-			return true, nil
+			return cliOptions{command: commandReport, json: true}, nil
+		}
+		if args[0] == "--version" || args[0] == "version" {
+			return cliOptions{command: commandVersion}, nil
+		}
+		if args[0] == "update" {
+			return cliOptions{command: commandUpdate}, nil
+		}
+	case 2:
+		if args[0] == "update" && args[1] != "" && !strings.HasPrefix(args[1], "-") {
+			return cliOptions{command: commandUpdate, updateVersion: args[1]}, nil
+		}
+	case 3:
+		if args[0] == "update" && args[1] == "--version" && args[2] != "" {
+			return cliOptions{command: commandUpdate, updateVersion: args[2]}, nil
 		}
 	}
-	return false, fmt.Errorf("usage: %s [--json]", os.Args[0])
+	return cliOptions{}, fmt.Errorf("usage: %s [--json|--version|update [VERSION]]", os.Args[0])
 }
 
 func tokenUsageProgressPrinter(enabled bool) (func(codex.TokenUsageProgress), func()) {

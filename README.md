@@ -55,6 +55,12 @@ Install a specific version:
 curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | CODEXSTAT_VERSION=v0.4.3 sh
 ```
 
+Install the latest unreleased build from `main`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | CODEXSTAT_VERSION=main sh
+```
+
 Install from source with Go:
 
 ```sh
@@ -69,7 +75,25 @@ Install the current checkout:
 
 ## Update
 
-Re-run the installer:
+Use the built-in updater:
+
+```sh
+codexstat update
+```
+
+Update to a specific version:
+
+```sh
+codexstat update v0.4.3
+```
+
+Update to the latest unreleased `main` build:
+
+```sh
+codexstat update main
+```
+
+Or re-run the installer:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | sh
@@ -87,12 +111,6 @@ If you installed from a checkout:
 git pull --ff-only && ./install.sh --local
 ```
 
-Track unreleased `main` instead of tagged releases:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | CODEXSTAT_VERSION=main sh
-```
-
 ## Requirements
 
 - macOS or Linux.
@@ -105,9 +123,10 @@ curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | 
 ```sh
 codexstat
 codexstat --json
+codexstat --version
 ```
 
-That is the whole command surface. `codexstat` prints a summarized terminal view; `codexstat --json` prints machine-readable JSON with the full underlying data.
+`codexstat` prints a summarized terminal view; `codexstat --json` prints machine-readable JSON with the full underlying data; `codexstat update` replaces the installed binary with a downloaded GitHub release asset after verifying `checksums.txt`.
 
 By default, `codexstat` tries Codex OAuth usage data first, falls back to a local `codex app-server` process when needed, records a quota snapshot, and scans all local token history. The terminal view is intentionally summarized; use JSON when you need every daily row.
 
@@ -253,7 +272,12 @@ If you change terminal rendering, regenerate or update the demo image only when 
 
 ## Maintainer Notes
 
-The release workflow is tag-driven. To publish a release:
+The release workflow publishes two channels:
+
+- pushing to `main` updates the moving `nightly` prerelease;
+- pushing a `v*` tag publishes a stable GitHub release.
+
+To publish a stable release:
 
 ```sh
 go test ./...
@@ -261,9 +285,9 @@ git tag v0.4.3
 git push origin v0.4.3
 ```
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, builds macOS and Linux tarballs, publishes `checksums.txt`, and creates or updates the GitHub release.
+`.github/workflows/release.yml` builds macOS and Linux tarballs, publishes `checksums.txt`, and creates or updates the GitHub release.
 
-After the release is published, verify the installer from outside the checkout:
+After a stable release is published, verify the installer from outside the checkout:
 
 ```sh
 tmp="$(mktemp -d)"

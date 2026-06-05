@@ -25,6 +25,7 @@ Options:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | sh
   curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | CODEXSTAT_VERSION=v0.4.3 sh
+  curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | CODEXSTAT_VERSION=main sh
   CODEXSTAT_INSTALL_DIR="$HOME/bin" ./install.sh
   ./install.sh --local
 EOF
@@ -161,14 +162,12 @@ install_from_release() {
 	command -v curl >/dev/null 2>&1 || return 1
 	command -v tar >/dev/null 2>&1 || return 1
 
-	if [ "$VERSION" = "main" ]; then
-		return 1
-	fi
-
 	tag="$VERSION"
 	if [ "$tag" = "latest" ]; then
 		tag="$(latest_tag || true)"
 		[ -n "$tag" ] || return 1
+	elif [ "$tag" = "main" ]; then
+		tag="nightly"
 	fi
 
 	asset="${BIN}_${OS}_${ARCH}.tar.gz"
