@@ -130,4 +130,4 @@ Release notes for maintainers live in [docs/RELEASING.md](docs/RELEASING.md).
 
 ## License
 
-No license file has been committed yet. Add one before treating this repository as reusable open-source software.
+MIT. See [LICENSE](LICENSE).
