@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | 
 Install a specific version:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | CODEXSTAT_VERSION=v0.4.3 sh
+curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | CODEXSTAT_VERSION=v0.4.4 sh
 ```
 
 Install the latest unreleased build from `main`:
@@ -93,7 +93,7 @@ For a private repository, set `CODEXSTAT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_T
 Update to a specific version:
 
 ```sh
-codexstat update v0.4.3
+codexstat update v0.4.4
 ```
 
 Update to the latest unreleased `main` build:
@@ -290,8 +290,8 @@ To publish a stable release:
 
 ```sh
 go test ./...
-git tag v0.4.3
-git push origin v0.4.3
+git tag v0.4.4
+git push origin v0.4.4
 ```
 
 `.github/workflows/release.yml` builds macOS and Linux tarballs, publishes `checksums.txt`, and creates or updates the GitHub release.
