@@ -32,7 +32,8 @@ The installer downloads a prebuilt release for macOS or Linux and installs `code
 For a private repository, pass a token that can read releases:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | GH_TOKEN="$(gh auth token)" sh
+token="$(gh auth token)"
+curl -H "Authorization: Bearer $token" -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | GH_TOKEN="$token" sh
 ```
 
 Prefer to inspect the installer first?
