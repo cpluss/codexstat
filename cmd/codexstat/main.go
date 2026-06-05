@@ -54,6 +54,8 @@ func run(args []string) {
 		return
 	}
 
+	updateNoticeDone := startUpdateNoticeCheck(!opts.json)
+
 	timeout := 15 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -109,8 +111,14 @@ func run(args []string) {
 		return
 	}
 
+	useColor := shouldUseColor()
+	if notice, ok := receiveUpdateNotice(updateNoticeDone); ok {
+		fmt.Println(renderUpdateNotice(notice, useColor))
+		fmt.Println()
+	}
+
 	fmt.Println(codex.RenderText(snapshot, codex.RenderOptions{
-		Color: shouldUseColor(),
+		Color: useColor,
 		Now:   now,
 	}))
 }

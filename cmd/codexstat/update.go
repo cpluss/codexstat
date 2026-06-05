@@ -15,13 +15,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	defaultUpdateRepo = "cpluss/codexstat"
-	updateBinaryName  = "codexstat"
+	defaultUpdateRepo  = "cpluss/codexstat"
+	updateBinaryName   = "codexstat"
+	updateCheckTimeout = 2 * time.Second
 )
 
 type updateOptions struct {
@@ -38,6 +40,22 @@ type githubReleaseAsset struct {
 	APIURL             string `json:"url"`
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+type updateNotice struct {
+	CurrentVersion string
+	LatestVersion  string
+}
+
+type updateNoticeResult struct {
+	Notice updateNotice
+	Err    error
+}
+
+type releaseVersion struct {
+	Major int
+	Minor int
+	Patch int
 }
 
 func selfUpdate(ctx context.Context, opts updateOptions) error {
@@ -115,6 +133,153 @@ func selfUpdate(ctx context.Context, opts updateOptions) error {
 	}
 	fmt.Fprintf(out, "codexstat: updated to %s at %s\n", release.TagName, installPath)
 	return nil
+}
+
+func startUpdateNoticeCheck(enabled bool) <-chan updateNoticeResult {
+	ch := make(chan updateNoticeResult, 1)
+	if !enabled {
+		close(ch)
+		return ch
+	}
+
+	currentVersion := versionString()
+	if _, ok := parseReleaseVersion(currentVersion); !ok {
+		close(ch)
+		return ch
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
+		defer cancel()
+
+		client := &http.Client{Timeout: updateCheckTimeout}
+		notice, err := latestUpdateNotice(ctx, client, currentVersion)
+		ch <- updateNoticeResult{Notice: notice, Err: err}
+	}()
+	return ch
+}
+
+func receiveUpdateNotice(done <-chan updateNoticeResult) (updateNotice, bool) {
+	if done == nil {
+		return updateNotice{}, false
+	}
+	result, ok := <-done
+	if !ok || result.Err != nil || result.Notice.LatestVersion == "" {
+		return updateNotice{}, false
+	}
+	return result.Notice, true
+}
+
+func latestUpdateNotice(ctx context.Context, client *http.Client, currentVersion string) (updateNotice, error) {
+	repo := strings.TrimSpace(os.Getenv("CODEXSTAT_REPO"))
+	if repo == "" {
+		repo = defaultUpdateRepo
+	}
+
+	release, err := fetchRelease(ctx, client, repo, "latest", githubToken())
+	if err != nil {
+		return updateNotice{}, err
+	}
+
+	if notice, ok := updateNoticeForRelease(currentVersion, release); ok {
+		return notice, nil
+	}
+	return updateNotice{}, nil
+}
+
+func updateNoticeForRelease(currentVersion string, release githubRelease) (updateNotice, bool) {
+	currentVersion = strings.TrimSpace(currentVersion)
+	latestVersion := strings.TrimSpace(release.TagName)
+	if !newerReleaseAvailable(currentVersion, latestVersion) {
+		return updateNotice{}, false
+	}
+	return updateNotice{
+		CurrentVersion: currentVersion,
+		LatestVersion:  latestVersion,
+	}, true
+}
+
+func newerReleaseAvailable(currentVersion, latestVersion string) bool {
+	current, ok := parseReleaseVersion(currentVersion)
+	if !ok {
+		return false
+	}
+	latest, ok := parseReleaseVersion(latestVersion)
+	if !ok {
+		return false
+	}
+	return compareReleaseVersions(latest, current) > 0
+}
+
+func parseReleaseVersion(value string) (releaseVersion, bool) {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "dev") {
+		return releaseVersion{}, false
+	}
+	if len(value) > 0 && (value[0] == 'v' || value[0] == 'V') {
+		value = value[1:]
+	}
+	if index := strings.IndexAny(value, "+-"); index >= 0 {
+		value = value[:index]
+	}
+
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return releaseVersion{}, false
+	}
+
+	major, ok := parseVersionPart(parts[0])
+	if !ok {
+		return releaseVersion{}, false
+	}
+	minor, ok := parseVersionPart(parts[1])
+	if !ok {
+		return releaseVersion{}, false
+	}
+	patch, ok := parseVersionPart(parts[2])
+	if !ok {
+		return releaseVersion{}, false
+	}
+	return releaseVersion{Major: major, Minor: minor, Patch: patch}, true
+}
+
+func parseVersionPart(value string) (int, bool) {
+	if value == "" {
+		return 0, false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
+}
+
+func compareReleaseVersions(left, right releaseVersion) int {
+	if left.Major != right.Major {
+		return left.Major - right.Major
+	}
+	if left.Minor != right.Minor {
+		return left.Minor - right.Minor
+	}
+	return left.Patch - right.Patch
+}
+
+func renderUpdateNotice(notice updateNotice, color bool) string {
+	lines := []string{
+		fmt.Sprintf("New codexstat release available: %s (current %s)", notice.LatestVersion, notice.CurrentVersion),
+		"Update with: codexstat update",
+	}
+
+	text := strings.Join(lines, "\n")
+	if !color {
+		return text
+	}
+	return "\x1b[33m" + text + "\x1b[0m"
 }
 
 func githubToken() string {
