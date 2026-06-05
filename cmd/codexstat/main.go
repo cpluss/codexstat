@@ -14,6 +14,8 @@ import (
 
 var version = "dev"
 
+const liveSnapshotCacheMaxAge = 5 * time.Minute
+
 func main() {
 	run(os.Args[1:])
 }
@@ -28,23 +30,6 @@ func run(args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	snapshot, err := codex.Fetch(ctx, codex.Options{
-		Source:        codex.SourceAuto,
-		CodexBin:      "codex",
-		ClientVersion: versionString(),
-		Timeout:       timeout,
-	})
-	if err != nil {
-		exitErr(err, 1)
-	}
-
-	path, pathErr := codex.DefaultHistoryPath(nil)
-	if pathErr != nil {
-		snapshot.Warnings = append(snapshot.Warnings, "history path unavailable: "+pathErr.Error())
-	} else if err := codex.RecordSnapshot(path, snapshot); err != nil {
-		snapshot.Warnings = append(snapshot.Warnings, "history write failed: "+err.Error())
-	}
-
 	progress, finishProgress := tokenUsageProgressPrinter(isTerminal(os.Stderr))
 	defer finishProgress()
 	now := time.Now()
@@ -54,11 +39,39 @@ func run(args []string) {
 		Now:      now,
 		Progress: progress,
 	}
-	tokenUsage, err := codex.BuildTokenUsageReport(tokenUsageQuery)
+	type tokenUsageResult struct {
+		report codex.TokenUsageReport
+		err    error
+	}
+	tokenUsageDone := make(chan tokenUsageResult, 1)
+	go func() {
+		report, err := codex.BuildTokenUsageReport(tokenUsageQuery)
+		tokenUsageDone <- tokenUsageResult{report: report, err: err}
+	}()
+
+	snapshot, fetchedLive, err := loadOrFetchSnapshot(ctx, timeout)
 	if err != nil {
 		finishProgress()
-		snapshot.Warnings = append(snapshot.Warnings, "token usage unavailable: "+err.Error())
+		exitErr(err, 1)
+	}
+
+	if fetchedLive {
+		path, pathErr := codex.DefaultHistoryPath(nil)
+		if pathErr != nil {
+			snapshot.Warnings = append(snapshot.Warnings, "history path unavailable: "+pathErr.Error())
+		} else if err := codex.RecordSnapshot(path, snapshot); err != nil {
+			snapshot.Warnings = append(snapshot.Warnings, "history write failed: "+err.Error())
+		}
+	}
+
+	result := <-tokenUsageDone
+	var tokenUsage codex.TokenUsageReport
+	if result.err != nil {
+		finishProgress()
+		snapshot.Warnings = append(snapshot.Warnings, "token usage unavailable: "+result.err.Error())
 		tokenUsage = codex.EmptyTokenUsageReport(tokenUsageQuery)
+	} else {
+		tokenUsage = result.report
 	}
 	finishProgress()
 	snapshot.TokenUsage = &tokenUsage
@@ -72,6 +85,39 @@ func run(args []string) {
 		Color: shouldUseColor(),
 		Now:   now,
 	}))
+}
+
+func loadOrFetchSnapshot(ctx context.Context, timeout time.Duration) (*codex.Snapshot, bool, error) {
+	now := time.Now()
+	cachePath, cachePathErr := codex.DefaultSnapshotCachePath(nil)
+	if cachePathErr == nil {
+		if cached, fresh, err := codex.FreshSnapshotFromCache(cachePath, now, liveSnapshotCacheMaxAge); err == nil && fresh {
+			return cached, false, nil
+		}
+	}
+
+	snapshot, err := codex.Fetch(ctx, codex.Options{
+		Source:        codex.SourceAuto,
+		CodexBin:      "codex",
+		ClientVersion: versionString(),
+		Timeout:       timeout,
+	})
+	if err != nil {
+		if cachePathErr == nil {
+			if record, loadErr := codex.LoadSnapshotCache(cachePath, now); loadErr == nil && record != nil {
+				record.Snapshot.Warnings = append(record.Snapshot.Warnings, "live stats unavailable; using cached snapshot from "+record.CachedAt.Local().Format(time.RFC3339))
+				return &record.Snapshot, false, nil
+			}
+		}
+		return nil, false, err
+	}
+
+	if cachePathErr != nil {
+		snapshot.Warnings = append(snapshot.Warnings, "snapshot cache path unavailable: "+cachePathErr.Error())
+	} else if err := codex.RecordSnapshotCache(cachePath, snapshot, time.Now()); err != nil {
+		snapshot.Warnings = append(snapshot.Warnings, "snapshot cache write failed: "+err.Error())
+	}
+	return snapshot, true, nil
 }
 
 func parseArgs(args []string) (bool, error) {

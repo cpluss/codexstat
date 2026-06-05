@@ -20,6 +20,7 @@ type TokenUsageQuery struct {
 	Metric    string    `json:"metric"`
 	Now       time.Time `json:"now"`
 	CodexHome string    `json:"codex_home,omitempty"`
+	CachePath string    `json:"cache_path,omitempty"`
 	Env       map[string]string
 	Progress  func(TokenUsageProgress) `json:"-"`
 }
@@ -75,6 +76,14 @@ func isTokenHistoryMetric(metric string) bool {
 }
 
 func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
+	report, err := buildCachedTokenUsageReport(query)
+	if err == nil {
+		return report, nil
+	}
+	return buildTokenUsageReportFromLogs(query)
+}
+
+func buildTokenUsageReportFromLogs(query TokenUsageQuery) (TokenUsageReport, error) {
 	metricInput := query.Metric
 	query = normalizeTokenUsageQuery(query)
 	if !isTokenHistoryMetric(query.Metric) {
@@ -260,7 +269,9 @@ func tokenUsageDaysFromMap(dayMap map[string]*tokenUsageDayBuilder, metric strin
 			days = append(days, TokenUsageDay{Date: key})
 			continue
 		}
-		builder.day.Sessions = len(builder.sessions)
+		if builder.sessions != nil {
+			builder.day.Sessions = len(builder.sessions)
+		}
 		builder.day.Graph = tokenMetricValue(builder.day.Tokens, metric)
 		total.add(builder.day.Tokens)
 		days = append(days, builder.day)

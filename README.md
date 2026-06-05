@@ -146,6 +146,15 @@ codex -s read-only -a untrusted app-server
 
 Then it reads account and rate-limit data over the local JSON-RPC app-server protocol.
 
+Live quota snapshots are cached for quick repeat launches. If the cached live stats are less than five minutes old, `codexstat` uses them directly and skips the OAuth/API fetch. If live refresh fails later, `codexstat` falls back to the cached snapshot with a warning.
+
+Default live snapshot cache paths:
+
+- macOS: `~/Library/Caches/codexstat/snapshot.json`
+- Linux and other Unix: `$XDG_CACHE_HOME/codexstat/snapshot.json` or `~/.cache/codexstat/snapshot.json`
+
+Set `CODEXSTAT_SNAPSHOT_CACHE` to use a different live snapshot cache file.
+
 ## Local History
 
 Token usage is scanned from every local Codex session log `codexstat` can find:
@@ -153,7 +162,14 @@ Token usage is scanned from every local Codex session log `codexstat` can find:
 - `~/.codex/sessions/YYYY/MM/DD/*.jsonl`
 - `~/.codex/archived_sessions/*.jsonl`
 
-Interactive scans print a compact progress line on stderr. Normal text and JSON results stay on stdout.
+The first run builds a local SQLite cache containing only the file metadata and per-day token aggregates needed for reports. Later runs refresh that cache incrementally by checking session log size and modification time, then reparsing only new or changed files from the latest cached date minus one day through today. Interactive refreshes print a compact progress line on stderr. Normal text and JSON results stay on stdout.
+
+Default token usage cache paths:
+
+- macOS: `~/Library/Caches/codexstat/token_usage.sqlite`
+- Linux and other Unix: `$XDG_CACHE_HOME/codexstat/token_usage.sqlite` or `~/.cache/codexstat/token_usage.sqlite`
+
+Set `CODEXSTAT_TOKEN_USAGE_CACHE` to use a different token usage cache file.
 
 The terminal report summarizes that local history into a small dashboard:
 
@@ -192,7 +208,9 @@ It reads:
 
 It writes:
 
+- live quota snapshots to the `codexstat` snapshot cache file;
 - quota snapshots to the `codexstat` history JSONL file;
+- token usage aggregates to the `codexstat` SQLite cache file;
 - refreshed Codex OAuth credentials, only when refresh is needed.
 
 For live OAuth stats, it sends requests to the Codex/ChatGPT usage endpoint and to `auth.openai.com` only when a token refresh is needed.

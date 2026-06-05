@@ -58,6 +58,224 @@ func TestBuildTokenUsageReportScansCodexSessions(t *testing.T) {
 	}
 }
 
+func TestBuildTokenUsageReportUsesCacheForUnchangedFiles(t *testing.T) {
+	home := t.TempDir()
+	sessionDir := filepath.Join(home, "sessions", "2026", "05", "31")
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sessionDir, "rollout-2026-05-31T10-00-00-test.jsonl")
+	cachePath := filepath.Join(home, "cache", "token_usage.sqlite")
+	modTime := time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)
+
+	validLine := fmt.Sprintf(
+		`{"timestamp":"2026-05-31T09:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}},"padding":%q}`,
+		strings.Repeat("x", 120),
+	)
+	validContents := validLine + "\n"
+	if err := os.WriteFile(path, []byte(validContents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatal(err)
+	}
+
+	query := TokenUsageQuery{
+		Metric:    "tokens",
+		Now:       time.Date(2026, 5, 31, 12, 0, 0, 0, time.Local),
+		CodexHome: home,
+		CachePath: cachePath,
+		Env:       map[string]string{"HOME": home},
+	}
+	report, err := BuildTokenUsageReport(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Total.Total != 110 {
+		t.Fatalf("unexpected initial total: %#v", report.Total)
+	}
+
+	invalidLine := `{"timestamp":"not-a-time","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":999,"output_tokens":1,"total_tokens":1000}}}}`
+	if len(invalidLine)+1 > len(validContents) {
+		t.Fatalf("invalid fixture is longer than valid fixture")
+	}
+	invalidContents := invalidLine + strings.Repeat(" ", len(validContents)-len(invalidLine)-1) + "\n"
+	if len(invalidContents) != len(validContents) {
+		t.Fatalf("fixture length mismatch: got %d, want %d", len(invalidContents), len(validContents))
+	}
+	if err := os.WriteFile(path, []byte(invalidContents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err = BuildTokenUsageReport(query)
+	if err != nil {
+		t.Fatalf("unchanged file should be served from cache: %v", err)
+	}
+	if report.Total.Total != 110 || report.EventsScanned != 1 {
+		t.Fatalf("unexpected cached report: %#v", report)
+	}
+}
+
+func TestBuildTokenUsageReportRefreshesChangedCacheFiles(t *testing.T) {
+	home := t.TempDir()
+	sessionDir := filepath.Join(home, "sessions", "2026", "05", "31")
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sessionDir, "rollout-2026-05-31T10-00-00-test.jsonl")
+	cachePath := filepath.Join(home, "cache", "token_usage.sqlite")
+
+	firstLine := `{"timestamp":"2026-05-31T09:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}}`
+	if err := os.WriteFile(path, []byte(firstLine+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	query := TokenUsageQuery{
+		Metric:    "tokens",
+		Now:       time.Date(2026, 5, 31, 12, 0, 0, 0, time.Local),
+		CodexHome: home,
+		CachePath: cachePath,
+		Env:       map[string]string{"HOME": home},
+	}
+	report, err := BuildTokenUsageReport(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Total.Total != 110 || report.EventsScanned != 1 {
+		t.Fatalf("unexpected initial report: %#v", report)
+	}
+
+	secondLine := `{"timestamp":"2026-05-31T09:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"output_tokens":20,"total_tokens":70}}}}`
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(secondLine + "\n"); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err = BuildTokenUsageReport(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Total.Total != 180 || report.EventsScanned != 2 {
+		t.Fatalf("changed file was not refreshed: %#v", report)
+	}
+}
+
+func TestBuildTokenUsageReportWarmCacheSkipsOlderFiles(t *testing.T) {
+	home := t.TempDir()
+	cachePath := filepath.Join(home, "cache", "token_usage.sqlite")
+	oldPath := filepath.Join(home, "sessions", "2026", "05", "01", "rollout-2026-05-01T10-00-00-old.jsonl")
+	todayPath := filepath.Join(home, "sessions", "2026", "05", "31", "rollout-2026-05-31T10-00-00-today.jsonl")
+
+	for _, path := range []string{oldPath, todayPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldLine := `{"timestamp":"2026-05-01T09:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}}`
+	todayLine := `{"timestamp":"2026-05-31T09:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"output_tokens":20,"total_tokens":220}}}}`
+	if err := os.WriteFile(oldPath, []byte(oldLine+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(todayPath, []byte(todayLine+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	query := TokenUsageQuery{
+		Metric:    "tokens",
+		Now:       time.Date(2026, 5, 31, 12, 0, 0, 0, time.Local),
+		CodexHome: home,
+		CachePath: cachePath,
+		Env:       map[string]string{"HOME": home},
+	}
+	report, err := BuildTokenUsageReport(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Total.Total != 330 || report.EventsScanned != 2 {
+		t.Fatalf("unexpected initial report: %#v", report)
+	}
+
+	invalidOldLine := `{"timestamp":"not-a-time","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":999,"output_tokens":1,"total_tokens":1000}}}}`
+	if err := os.WriteFile(oldPath, []byte(invalidOldLine+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err = BuildTokenUsageReport(query)
+	if err != nil {
+		t.Fatalf("warm cache should not reparse older files: %v", err)
+	}
+	if report.Total.Total != 330 || report.EventsScanned != 2 {
+		t.Fatalf("older cached aggregate changed unexpectedly: %#v", report)
+	}
+}
+
+func TestBuildTokenUsageReportWarmCacheRefreshesPreviousDay(t *testing.T) {
+	home := t.TempDir()
+	cachePath := filepath.Join(home, "cache", "token_usage.sqlite")
+	yesterdayPath := filepath.Join(home, "sessions", "2026", "05", "30", "rollout-2026-05-30T23-55-00-yesterday.jsonl")
+	todayPath := filepath.Join(home, "sessions", "2026", "05", "31", "rollout-2026-05-31T10-00-00-today.jsonl")
+
+	for _, path := range []string{yesterdayPath, todayPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	yesterdayLine := `{"timestamp":"2026-05-30T22:55:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}}`
+	todayLine := `{"timestamp":"2026-05-31T09:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"output_tokens":20,"total_tokens":220}}}}`
+	if err := os.WriteFile(yesterdayPath, []byte(yesterdayLine+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(todayPath, []byte(todayLine+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	query := TokenUsageQuery{
+		Metric:    "tokens",
+		Now:       time.Date(2026, 5, 31, 12, 0, 0, 0, time.Local),
+		CodexHome: home,
+		CachePath: cachePath,
+		Env:       map[string]string{"HOME": home},
+	}
+	report, err := BuildTokenUsageReport(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Total.Total != 330 || report.EventsScanned != 2 {
+		t.Fatalf("unexpected initial report: %#v", report)
+	}
+
+	appendLine := `{"timestamp":"2026-05-31T00:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"output_tokens":5,"total_tokens":55}}}}`
+	file, err := os.OpenFile(yesterdayPath, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(appendLine + "\n"); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err = BuildTokenUsageReport(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Total.Total != 385 || report.EventsScanned != 3 {
+		t.Fatalf("previous-day session was not refreshed: %#v", report)
+	}
+}
+
 func TestBuildTokenUsageReportUsesOutputMetric(t *testing.T) {
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.Local)
 	home := t.TempDir()
