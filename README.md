@@ -29,6 +29,12 @@ curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | 
 
 The installer downloads a prebuilt release for macOS or Linux and installs `codexstat` to `~/.local/bin`. If no matching release binary is available, it falls back to `go install`.
 
+For a private repository, pass a token that can read releases:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | GH_TOKEN="$(gh auth token)" sh
+```
+
 Prefer to inspect the installer first?
 
 ```sh
@@ -80,6 +86,8 @@ Use the built-in updater:
 ```sh
 codexstat update
 ```
+
+For a private repository, set `CODEXSTAT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` so the updater can read the GitHub release API.
 
 Update to a specific version:
 

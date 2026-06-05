@@ -30,11 +30,14 @@ type updateOptions struct {
 }
 
 type githubRelease struct {
-	TagName string `json:"tag_name"`
-	Assets  []struct {
-		Name               string `json:"name"`
-		BrowserDownloadURL string `json:"browser_download_url"`
-	} `json:"assets"`
+	TagName string               `json:"tag_name"`
+	Assets  []githubReleaseAsset `json:"assets"`
+}
+
+type githubReleaseAsset struct {
+	APIURL             string `json:"url"`
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
 func selfUpdate(ctx context.Context, opts updateOptions) error {
@@ -42,6 +45,7 @@ func selfUpdate(ctx context.Context, opts updateOptions) error {
 	if repo == "" {
 		repo = defaultUpdateRepo
 	}
+	token := githubToken()
 
 	version := strings.TrimSpace(opts.Version)
 	if version == "" {
@@ -62,17 +66,17 @@ func selfUpdate(ctx context.Context, opts updateOptions) error {
 	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
-	release, err := fetchRelease(ctx, client, repo, version)
+	release, err := fetchRelease(ctx, client, repo, version, token)
 	if err != nil {
 		return err
 	}
 
 	assetName := updateAssetName(target)
-	assetURL, ok := releaseAssetURL(release, assetName)
+	asset, ok := releaseAsset(release, assetName)
 	if !ok {
 		return fmt.Errorf("release %s has no asset named %s", release.TagName, assetName)
 	}
-	checksumsURL, ok := releaseAssetURL(release, "checksums.txt")
+	checksums, ok := releaseAsset(release, "checksums.txt")
 	if !ok {
 		return fmt.Errorf("release %s has no checksums.txt asset", release.TagName)
 	}
@@ -84,12 +88,12 @@ func selfUpdate(ctx context.Context, opts updateOptions) error {
 	defer os.RemoveAll(tmpDir)
 
 	assetPath := filepath.Join(tmpDir, assetName)
-	if err := downloadFile(ctx, client, assetURL, assetPath); err != nil {
+	if err := downloadReleaseAsset(ctx, client, asset, assetPath, token); err != nil {
 		return err
 	}
 
 	checksumsPath := filepath.Join(tmpDir, "checksums.txt")
-	if err := downloadFile(ctx, client, checksumsURL, checksumsPath); err != nil {
+	if err := downloadReleaseAsset(ctx, client, checksums, checksumsPath, token); err != nil {
 		return err
 	}
 	if err := verifyDownloadedChecksum(assetPath, checksumsPath, assetName); err != nil {
@@ -111,6 +115,15 @@ func selfUpdate(ctx context.Context, opts updateOptions) error {
 	}
 	fmt.Fprintf(out, "codexstat: updated to %s at %s\n", release.TagName, installPath)
 	return nil
+}
+
+func githubToken() string {
+	for _, key := range []string{"CODEXSTAT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+		if token := strings.TrimSpace(os.Getenv(key)); token != "" {
+			return token
+		}
+	}
+	return ""
 }
 
 func updateInstallPath() (string, error) {
@@ -159,7 +172,7 @@ func updateAssetName(target string) string {
 	return updateBinaryName + "_" + target + ".tar.gz"
 }
 
-func fetchRelease(ctx context.Context, client *http.Client, repo, version string) (githubRelease, error) {
+func fetchRelease(ctx context.Context, client *http.Client, repo, version, token string) (githubRelease, error) {
 	endpoint := "latest"
 	if version != "latest" {
 		if version == "main" {
@@ -174,6 +187,9 @@ func fetchRelease(ctx context.Context, client *http.Client, repo, version string
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "codexstat/"+versionString())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -195,21 +211,40 @@ func fetchRelease(ctx context.Context, client *http.Client, repo, version string
 	return release, nil
 }
 
-func releaseAssetURL(release githubRelease, name string) (string, bool) {
+func releaseAsset(release githubRelease, name string) (githubReleaseAsset, bool) {
 	for _, asset := range release.Assets {
-		if asset.Name == name && asset.BrowserDownloadURL != "" {
-			return asset.BrowserDownloadURL, true
+		if asset.Name == name && (asset.BrowserDownloadURL != "" || asset.APIURL != "") {
+			return asset, true
 		}
 	}
-	return "", false
+	return githubReleaseAsset{}, false
 }
 
-func downloadFile(ctx context.Context, client *http.Client, sourceURL, destinationPath string) error {
+func downloadReleaseAsset(ctx context.Context, client *http.Client, asset githubReleaseAsset, destinationPath, token string) error {
+	sourceURL := asset.BrowserDownloadURL
+	accept := ""
+	if token != "" && asset.APIURL != "" {
+		sourceURL = asset.APIURL
+		accept = "application/octet-stream"
+	}
+	if sourceURL == "" {
+		return fmt.Errorf("release asset %s has no download URL", asset.Name)
+	}
+	return downloadFile(ctx, client, sourceURL, destinationPath, token, accept)
+}
+
+func downloadFile(ctx context.Context, client *http.Client, sourceURL, destinationPath, token, accept string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "codexstat/"+versionString())
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

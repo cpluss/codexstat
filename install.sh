@@ -119,9 +119,95 @@ detect_target() {
 
 latest_tag() {
 	need_cmd curl
-	curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
+	github_api "https://api.github.com/repos/$REPO/releases/latest" |
 		sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
 		head -n 1
+}
+
+github_token() {
+	if [ -n "${CODEXSTAT_GITHUB_TOKEN:-}" ]; then
+		printf '%s\n' "$CODEXSTAT_GITHUB_TOKEN"
+	elif [ -n "${GH_TOKEN:-}" ]; then
+		printf '%s\n' "$GH_TOKEN"
+	elif [ -n "${GITHUB_TOKEN:-}" ]; then
+		printf '%s\n' "$GITHUB_TOKEN"
+	fi
+}
+
+github_api() {
+	url="$1"
+	token="$(github_token)"
+	if [ -n "$token" ]; then
+		curl -fsSL \
+			-H "Authorization: Bearer $token" \
+			-H "Accept: application/vnd.github+json" \
+			"$url"
+	else
+		curl -fsSL \
+			-H "Accept: application/vnd.github+json" \
+			"$url"
+	fi
+}
+
+asset_api_url() {
+	tag="$1"
+	asset_name="$2"
+	github_api "https://api.github.com/repos/$REPO/releases/tags/$tag" |
+		awk -v target="$asset_name" '
+			/"url"[[:space:]]*:[[:space:]]*"https:\/\/api.github.com\/repos\/.*\/releases\/assets\// {
+				url = $0
+				sub(/^[^"]*"url"[[:space:]]*:[[:space:]]*"/, "", url)
+				sub(/".*$/, "", url)
+			}
+			/"name"[[:space:]]*:/ {
+				name = $0
+				sub(/^[^"]*"name"[[:space:]]*:[[:space:]]*"/, "", name)
+				sub(/".*$/, "", name)
+				if (name == target && url != "") {
+					print url
+					exit
+				}
+			}
+		'
+}
+
+curl_download() {
+	url="$1"
+	destination="$2"
+	accept="${3:-}"
+	token="$(github_token)"
+	if [ -n "$token" ]; then
+		if [ -n "$accept" ]; then
+			curl -fL \
+				-H "Authorization: Bearer $token" \
+				-H "Accept: $accept" \
+				"$url" \
+				-o "$destination"
+		else
+			curl -fL \
+				-H "Authorization: Bearer $token" \
+				"$url" \
+				-o "$destination"
+		fi
+	else
+		curl -fL "$url" -o "$destination"
+	fi
+}
+
+download_release_asset() {
+	tag="$1"
+	asset_name="$2"
+	destination="$3"
+
+	if [ -n "$(github_token)" ]; then
+		api_url="$(asset_api_url "$tag" "$asset_name" || true)"
+		if [ -n "$api_url" ]; then
+			curl_download "$api_url" "$destination" "application/octet-stream"
+			return $?
+		fi
+	fi
+
+	curl_download "https://github.com/$REPO/releases/download/$tag/$asset_name" "$destination"
 }
 
 sha256_file() {
@@ -171,14 +257,13 @@ install_from_release() {
 	fi
 
 	asset="${BIN}_${OS}_${ARCH}.tar.gz"
-	base_url="https://github.com/$REPO/releases/download/$tag"
 
 	log "downloading $REPO $tag for $OS/$ARCH"
-	if ! curl -fL "$base_url/$asset" -o "$TMP/$asset"; then
+	if ! download_release_asset "$tag" "$asset" "$TMP/$asset"; then
 		return 1
 	fi
 
-	if curl -fL "$base_url/checksums.txt" -o "$TMP/checksums.txt"; then
+	if download_release_asset "$tag" "checksums.txt" "$TMP/checksums.txt"; then
 		verify_checksum "$asset"
 	else
 		log "warning: checksums.txt unavailable; skipping checksum verification"

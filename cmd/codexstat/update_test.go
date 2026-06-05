@@ -33,3 +33,20 @@ func TestChecksumForAssetRejectsMissingAsset(t *testing.T) {
 		t.Fatal("checksumForAsset succeeded for missing asset")
 	}
 }
+
+func TestReleaseAssetSelectsNamedAsset(t *testing.T) {
+	release := githubRelease{
+		Assets: []githubReleaseAsset{
+			{Name: "checksums.txt", APIURL: "https://api.example.test/checksums"},
+			{Name: "codexstat_darwin_arm64.tar.gz", APIURL: "https://api.example.test/asset"},
+		},
+	}
+
+	asset, ok := releaseAsset(release, "codexstat_darwin_arm64.tar.gz")
+	if !ok {
+		t.Fatal("releaseAsset did not find named asset")
+	}
+	if asset.APIURL != "https://api.example.test/asset" {
+		t.Fatalf("APIURL = %q", asset.APIURL)
+	}
+}
