@@ -7,8 +7,8 @@
 #   brew install imagemagick
 #
 # This intentionally uses the caller's real Codex auth/session data so the
-# README image matches the actual pretty-printed output. The command runs with
-# --no-record to avoid appending a quota snapshot while recording.
+# README image matches the actual pretty-printed output. Quota snapshots are
+# written to a temporary CODEXSTAT_HISTORY file while recording.
 
 set -euo pipefail
 
@@ -65,7 +65,7 @@ cat > "$DEMO_SCRIPT" <<'SH'
 set -euo pipefail
 sleep 0.1
 printf '\033[?25l\033[2J\033[H'
-codexstat --no-record
+codexstat
 sleep 2.5
 SH
 chmod +x "$DEMO_SCRIPT"

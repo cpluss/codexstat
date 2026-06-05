@@ -188,7 +188,7 @@ install_from_release() {
 	tar -xzf "$TMP/$asset" -C "$TMP"
 	[ -x "$TMP/$BIN" ] || die "$asset did not contain an executable $BIN"
 	install_binary "$TMP/$BIN"
-	log "installed $("$INSTALL_DIR/$BIN" --version) to $INSTALL_DIR/$BIN"
+	log "installed $BIN to $INSTALL_DIR/$BIN"
 }
 
 install_from_go() {
@@ -199,7 +199,7 @@ install_from_go() {
 	fi
 	log "building $REPO@$target with go install"
 	GOBIN="$INSTALL_DIR" go install "github.com/$REPO/cmd/$BIN@$target"
-	log "installed $("$INSTALL_DIR/$BIN" --version) to $INSTALL_DIR/$BIN"
+	log "installed $BIN to $INSTALL_DIR/$BIN"
 }
 
 install_from_local_checkout() {
@@ -213,7 +213,7 @@ install_from_local_checkout() {
 	log "building current checkout"
 	go build -trimpath -ldflags "-s -w -X main.version=$version" -o "$INSTALL_DIR/$BIN" ./cmd/codexstat
 	chmod 0755 "$INSTALL_DIR/$BIN"
-	log "installed $("$INSTALL_DIR/$BIN" --version) to $INSTALL_DIR/$BIN"
+	log "installed $BIN to $INSTALL_DIR/$BIN"
 }
 
 if [ "$LOCAL_BUILD" -eq 1 ]; then

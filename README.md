@@ -6,7 +6,7 @@ Terminal stats for Codex usage, limits, and local token history.
 curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | sh
 ```
 
-`codexstat` is a small local CLI that shows your current Codex session and weekly limits, account/credit metadata, and recent token usage from local Codex session logs. It is built for people who want a fast terminal readout without a menu bar app or browser dashboard scraping.
+`codexstat` is a small local CLI that shows your current Codex session and weekly limits plus all token usage it can find in local Codex session logs. It is built for people who want one terminal command without a menu bar app, browser dashboard scraping, or a pile of switches.
 
 <p align="center">
   <img src="docs/images/codexstat-demo.png" width="792" alt="codexstat terminal output showing Codex limits and token usage">
@@ -15,9 +15,8 @@ curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | 
 ## What It Shows
 
 - Current Codex session, weekly, and model-specific limits.
-- Account, plan, credit, source, and scan metadata.
-- Token usage by day from local Codex JSONL session logs.
-- Quota history graphs from local `codexstat` snapshots.
+- Token usage by day from all local Codex JSONL session logs.
+- Automatic quota snapshots for future local history.
 - Text tables and charts for humans; JSON output for scripts.
 
 ## Install
@@ -105,88 +104,41 @@ curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | 
 
 ```sh
 codexstat
-codexstat tokens --days 30
-codexstat history --metric session
-codexstat --json --pretty
+codexstat --json
 ```
 
-By default, `codexstat` uses `--source auto`: it tries OAuth usage data first, then falls back to a local `codex app-server` process.
+That is the whole command surface. `codexstat` prints a terminal view; `codexstat --json` prints the same report as machine-readable JSON.
 
-## Commands
+By default, `codexstat` tries Codex OAuth usage data first, falls back to a local `codex app-server` process when needed, records a quota snapshot, and scans all local token history.
 
-### `codexstat`
+## Usage
 
-Print current Codex account, credit, rate-limit, and recent token usage stats.
-
-Common flags:
-
-| Flag | Description |
-| --- | --- |
-| `--source auto|oauth|cli` | Choose the live stats source. Default: `auto`. |
-| `--json` | Print machine-readable JSON. |
-| `--pretty` | Pretty-print JSON output. |
-| `--codex-home PATH` | Use a Codex home other than `~/.codex`. |
-| `--codex-bin PATH` | Use a specific Codex executable for CLI fallback. |
-| `--timeout DURATION` | Set the live stats fetch timeout. Default: `15s`. |
-| `--no-refresh` | Do not refresh stale OAuth tokens. |
-| `--no-record` | Do not append this live fetch to quota history. |
-| `--history-file PATH` | Store quota snapshots somewhere other than the default path. |
-| `--no-color` | Disable ANSI color. `NO_COLOR` is also respected. |
-| `--version` | Print the installed version and exit. |
-
-### `codexstat tokens`
-
-Shortcut for local token usage history:
+Print the terminal report:
 
 ```sh
-codexstat tokens --days 30
+codexstat
 ```
 
-This is equivalent to:
+Print compact JSON:
 
 ```sh
-codexstat history --metric tokens --days 30
+codexstat --json
 ```
 
-### `codexstat history`
-
-Print a graph from local history:
-
-```sh
-codexstat history --days 14
-codexstat history --metric input
-codexstat history --metric cached
-codexstat history --metric output
-codexstat history --metric reasoning
-codexstat history --metric session
-codexstat history --metric weekly
-```
-
-History flags:
-
-| Flag | Description |
-| --- | --- |
-| `--days N` | Number of days to show. Default: `7`. |
-| `--metric tokens|input|cached|output|reasoning|session|weekly` | Select the graph metric. Default: `tokens`. |
-| `--codex-home PATH` | Use a Codex home other than `~/.codex` for token logs. |
-| `--history-file PATH` | Read quota snapshots from a custom path. |
-| `--json` | Print machine-readable JSON. |
-| `--pretty` | Pretty-print JSON output. |
-| `--no-color` | Disable ANSI color. |
+`NO_COLOR` disables ANSI color in text output. `FORCE_COLOR` and `CLICOLOR_FORCE` force color when set to a non-zero value.
 
 ## Data Sources
 
 `codexstat` can read live stats in two ways.
 
-`--source oauth` reads local Codex OAuth credentials from:
+The OAuth source reads local Codex credentials from:
 
 - `~/.codex/auth.json`
 - `$CODEX_HOME/auth.json`
-- the path implied by `--codex-home`
 
-It calls the Codex usage endpoint with the local access token. If the credential file contains a stale refresh token and `--no-refresh` is not set, `codexstat` refreshes the token and writes the updated credentials back to the same Codex auth file.
+It calls the Codex usage endpoint with the local access token. If the credential file contains a stale refresh token, `codexstat` refreshes it and writes the updated credentials back to the same Codex auth file.
 
-`--source cli` starts:
+If OAuth is unavailable, `codexstat` starts:
 
 ```sh
 codex -s read-only -a untrusted app-server
@@ -194,38 +146,33 @@ codex -s read-only -a untrusted app-server
 
 Then it reads account and rate-limit data over the local JSON-RPC app-server protocol.
 
-`--source auto` tries OAuth first and falls back to the CLI source if OAuth fails before the overall timeout.
-
 ## Local History
 
-Token usage is scanned from local Codex session logs:
+Token usage is scanned from every local Codex session log `codexstat` can find:
 
 - `~/.codex/sessions/YYYY/MM/DD/*.jsonl`
 - `~/.codex/archived_sessions/*.jsonl`
 
-Quota snapshots are recorded after successful live stats fetches unless `--no-record` is passed. Those snapshots power:
+Interactive scans print a compact progress line on stderr. Normal text and JSON results stay on stdout.
 
-- `codexstat history --metric session`
-- `codexstat history --metric weekly`
+Quota snapshots are recorded after successful live stats fetches.
 
 Default quota snapshot paths:
 
 - macOS: `~/Library/Application Support/codexstat/history.jsonl`
 - Linux and other Unix: `$XDG_STATE_HOME/codexstat/history.jsonl` or `~/.local/state/codexstat/history.jsonl`
 
-Set `CODEXSTAT_HISTORY` or pass `--history-file` to use a different file.
+Set `CODEXSTAT_HISTORY` to use a different quota snapshot file.
 
 ## JSON Output
 
 Use JSON for scripts, dashboards, or snapshot diffs:
 
 ```sh
-codexstat --json --pretty
-codexstat history --metric tokens --json --pretty
-codexstat history --metric weekly --json --pretty
+codexstat --json
 ```
 
-The main JSON output includes fetched live data and the local token usage report under `token_usage`.
+The JSON output includes fetched live data and the full local token usage report under `token_usage`.
 
 ## Privacy
 
@@ -240,9 +187,9 @@ It reads:
 It writes:
 
 - quota snapshots to the `codexstat` history JSONL file;
-- refreshed Codex OAuth credentials, only when refresh is needed and `--no-refresh` is not set.
+- refreshed Codex OAuth credentials, only when refresh is needed.
 
-For live OAuth stats, it sends requests to the Codex/ChatGPT usage endpoint and to `auth.openai.com` only when a token refresh is needed. Use `--no-record` to disable quota snapshot writes for a run.
+For live OAuth stats, it sends requests to the Codex/ChatGPT usage endpoint and to `auth.openai.com` only when a token refresh is needed.
 
 ## Development
 
@@ -258,7 +205,6 @@ Build and run locally:
 
 ```sh
 go build -o ./codexstat ./cmd/codexstat
-./codexstat --version
 ./codexstat
 ```
 
@@ -267,8 +213,6 @@ Install the checkout:
 ```sh
 ./install.sh --local
 ```
-
-`codexstat --version` is derived from Go build metadata. Tagged public installs report the selected tag; local checkout and branch installs may report a pseudo-version or `dev` with VCS details.
 
 ## Contributing
 
@@ -300,7 +244,7 @@ After the release is published, verify the installer from outside the checkout:
 ```sh
 tmp="$(mktemp -d)"
 curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | CODEXSTAT_INSTALL_DIR="$tmp" sh
-"$tmp/codexstat" --version
+"$tmp/codexstat" --json
 ```
 
 The public Go install fallback depends on the module path in `go.mod`:
@@ -313,11 +257,11 @@ github.com/cpluss/codexstat
 
 `codexstat: Codex auth.json not found`
 
-Run `codex` once and log in, or pass `--source cli` if you want to force the local CLI app-server path.
+Run `codex` once and log in.
 
 `codexstat: Codex CLI not found on PATH`
 
-Install the Codex CLI or pass `--codex-bin /path/to/codex`.
+Install the Codex CLI and make sure `codex` is on `PATH`.
 
 `codexstat` installed but the shell cannot find it
 
@@ -329,7 +273,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 No token history appears
 
-Run Codex normally first so local session JSONL logs exist, then run `codexstat tokens`.
+Run Codex normally first so local session JSONL logs exist, then run `codexstat`.
 
 ## License
 
