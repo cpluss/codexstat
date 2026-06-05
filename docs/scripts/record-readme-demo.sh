@@ -71,10 +71,10 @@ SH
 chmod +x "$DEMO_SCRIPT"
 
 echo "Capturing codexstat output to $OUTPUT..."
-echo "Terminal: 118x40"
+echo "Terminal: 118x68"
 
 asciinema rec "$CAST_FILE" \
-	--window-size "118x40" \
+	--window-size "118x68" \
 	--overwrite \
 	-c "bash '$DEMO_SCRIPT'"
 

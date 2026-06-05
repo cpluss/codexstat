@@ -8,6 +8,7 @@ import (
 
 type RenderOptions struct {
 	Color bool
+	Now   time.Time
 }
 
 func RenderText(snapshot *Snapshot, opts RenderOptions) string {

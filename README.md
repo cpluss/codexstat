@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/cpluss/codexstat/main/install.sh | 
 ## What It Shows
 
 - Current Codex session, weekly, and model-specific limits.
-- Token usage by day from all local Codex JSONL session logs.
+- Token usage summaries, monthly trends, and recent daily activity from local Codex JSONL session logs.
 - Automatic quota snapshots for future local history.
 - Text tables and charts for humans; JSON output for scripts.
 
@@ -107,9 +107,9 @@ codexstat
 codexstat --json
 ```
 
-That is the whole command surface. `codexstat` prints a terminal view; `codexstat --json` prints the same report as machine-readable JSON.
+That is the whole command surface. `codexstat` prints a summarized terminal view; `codexstat --json` prints machine-readable JSON with the full underlying data.
 
-By default, `codexstat` tries Codex OAuth usage data first, falls back to a local `codex app-server` process when needed, records a quota snapshot, and scans all local token history.
+By default, `codexstat` tries Codex OAuth usage data first, falls back to a local `codex app-server` process when needed, records a quota snapshot, and scans all local token history. The terminal view is intentionally summarized; use JSON when you need every daily row.
 
 ## Usage
 
@@ -155,6 +155,12 @@ Token usage is scanned from every local Codex session log `codexstat` can find:
 
 Interactive scans print a compact progress line on stderr. Normal text and JSON results stay on stdout.
 
+The terminal report summarizes that local history into a small dashboard:
+
+- current usage periods such as today, last 7 days, last 30 days, this month, last month, and all local history;
+- monthly usage with active-day counts and each month's peak day;
+- a last-30-days chart and a short recent-days table.
+
 Quota snapshots are recorded after successful live stats fetches.
 
 Default quota snapshot paths:
@@ -172,7 +178,7 @@ Use JSON for scripts, dashboards, or snapshot diffs:
 codexstat --json
 ```
 
-The JSON output includes fetched live data and the full local token usage report under `token_usage`.
+The JSON output includes fetched live data and the full local token usage report under `token_usage`, including the complete daily token history that the terminal view summarizes.
 
 ## Privacy
 

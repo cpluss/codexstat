@@ -47,10 +47,11 @@ func run(args []string) {
 
 	progress, finishProgress := tokenUsageProgressPrinter(isTerminal(os.Stderr))
 	defer finishProgress()
+	now := time.Now()
 	tokenUsageQuery := codex.TokenUsageQuery{
 		All:      true,
 		Metric:   "tokens",
-		Now:      time.Now(),
+		Now:      now,
 		Progress: progress,
 	}
 	tokenUsage, err := codex.BuildTokenUsageReport(tokenUsageQuery)
@@ -69,6 +70,7 @@ func run(args []string) {
 
 	fmt.Println(codex.RenderText(snapshot, codex.RenderOptions{
 		Color: shouldUseColor(),
+		Now:   now,
 	}))
 }
 

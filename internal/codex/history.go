@@ -17,6 +17,12 @@ import (
 
 const historyVersion = 1
 
+const (
+	tokenUsageRecentChartDays = 30
+	tokenUsageRecentTableDays = 7
+	tokenUsageMonthlyLimit    = 12
+)
+
 type HistoryRecord struct {
 	Version    int       `json:"version"`
 	CapturedAt time.Time `json:"captured_at"`
@@ -37,48 +43,101 @@ func renderTokenUsageInline(report TokenUsageReport, opts RenderOptions) []strin
 }
 
 func renderTokenUsageRows(report TokenUsageReport, opts RenderOptions) []string {
-	var lines []string
-	lines = append(lines, renderTokenUsageTimeChart(report, opts)...)
-	if len(lines) > 0 {
-		lines = append(lines, "")
+	if len(report.Days) == 0 {
+		return []string{mutedText("no token usage found", opts)}
 	}
 
-	rows := make([][]string, 0, len(report.Days)+2)
-	for _, day := range report.Days {
-		rows = append(rows, []string{
-			day.Date,
-			formatTokenCount(day.Tokens.Input),
-			formatTokenCount(day.Tokens.Cached),
-			formatTokenCount(day.Tokens.Output),
-			formatTokenCount(day.Tokens.Reasoning),
-			formatTokenCount(day.Tokens.Total),
-		})
+	now := renderNow(opts)
+	var lines []string
+
+	lines = append(lines, renderTokenUsageSummary(report, now, opts)...)
+	lines = append(lines, "")
+
+	lines = append(lines, renderTokenUsageMonths(report, now, opts)...)
+	lines = append(lines, "")
+
+	recentDays := tokenUsageRecentDays(report, now, tokenUsageRecentChartDays)
+	recentReport := report
+	recentReport.Days = recentDays
+	lines = append(lines, renderTokenUsageTimeChart(recentReport, opts, "Daily usage, last 30 days")...)
+	lines = append(lines, "")
+
+	lines = append(lines, renderRecentTokenUsageDays(recentReport, opts)...)
+	return lines
+}
+
+func renderTokenUsageSummary(report TokenUsageReport, now time.Time, opts RenderOptions) []string {
+	index := tokenUsageDayIndex(report.Days)
+	today := startOfLocalDay(now.Local())
+	yesterday := today.AddDate(0, 0, -1)
+	last7 := today.AddDate(0, 0, -6)
+	last30 := today.AddDate(0, 0, -(tokenUsageRecentChartDays - 1))
+	thisMonthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
+	lastMonthStart := thisMonthStart.AddDate(0, -1, 0)
+	lastMonthEnd := thisMonthStart.AddDate(0, 0, -1)
+
+	rows := [][]string{
+		{"Today", formatTokenMetric(sumTokenUsageRange(index, today, today), report.Metric)},
+		{"Yesterday", formatTokenMetric(sumTokenUsageRange(index, yesterday, yesterday), report.Metric)},
+		{"Last 7 days", formatTokenMetric(sumTokenUsageRange(index, last7, today), report.Metric)},
+		{"Last 30 days", formatTokenMetric(sumTokenUsageRange(index, last30, today), report.Metric)},
+		{"This month", formatTokenMetric(sumTokenUsageRange(index, thisMonthStart, today), report.Metric)},
+		{"Last month", formatTokenMetric(sumTokenUsageRange(index, lastMonthStart, lastMonthEnd), report.Metric)},
+		{"All local", formatTokenMetric(report.Total, report.Metric)},
 	}
-	if len(report.Days) > 0 {
-		rows = append(rows, tableSeparatorRow(6))
-	}
-	rows = append(rows, []string{
-		"Aggregate",
-		formatTokenCount(report.Total.Input),
-		formatTokenCount(report.Total.Cached),
-		formatTokenCount(report.Total.Output),
-		formatTokenCount(report.Total.Reasoning),
-		formatTokenCount(report.Total.Total),
-	})
+
+	lines := []string{sectionTitle("Summary", opts)}
 	lines = append(lines, renderPrettyTable(
-		[]string{"Date", "Input", "Cached", "Output", "Reason", "Total"},
+		[]string{"Period", metricColumnTitle(report.Metric)},
 		rows,
 		opts,
 		1,
-		2,
-		3,
-		4,
-		5,
 	)...)
 	return lines
 }
 
-func renderTokenUsageTimeChart(report TokenUsageReport, opts RenderOptions) []string {
+func renderTokenUsageMonths(report TokenUsageReport, now time.Time, opts RenderOptions) []string {
+	months := tokenUsageMonths(report.Days, report.Metric, now)
+	lines := []string{sectionTitle("Monthly usage", opts)}
+	if len(months) == 0 {
+		lines = append(lines, mutedText("no monthly usage found", opts))
+		return lines
+	}
+
+	hidden := 0
+	if len(months) > tokenUsageMonthlyLimit {
+		hidden = len(months) - tokenUsageMonthlyLimit
+		months = months[hidden:]
+	}
+
+	rows := make([][]string, 0, len(months))
+	for _, month := range months {
+		peak := "-"
+		if month.Peak.Graph > 0 {
+			peak = month.Peak.Date + " " + formatTokenMetric(month.Peak.Tokens, report.Metric)
+		}
+		rows = append(rows, []string{
+			month.Month,
+			fmt.Sprintf("%d/%d", month.ActiveDays, month.CalendarDays),
+			formatTokenMetric(month.Tokens, report.Metric),
+			peak,
+		})
+	}
+
+	lines = append(lines, renderPrettyTable(
+		[]string{"Month", "Active", metricColumnTitle(report.Metric), "Peak day"},
+		rows,
+		opts,
+		1,
+		2,
+	)...)
+	if hidden > 0 {
+		lines = append(lines, mutedText(fmt.Sprintf("showing last %d months; %d older months included in all local total", tokenUsageMonthlyLimit, hidden), opts))
+	}
+	return lines
+}
+
+func renderTokenUsageTimeChart(report TokenUsageReport, opts RenderOptions, title string) []string {
 	const chartHeight = 9
 
 	if len(report.Days) == 0 {
@@ -92,7 +151,6 @@ func renderTokenUsageTimeChart(report TokenUsageReport, opts RenderOptions) []st
 		}
 	}
 
-	title := titleCaseASCII(report.Metric) + "/day graph"
 	lines := []string{sectionTitle(title, opts)}
 	if maxGraph <= 0 {
 		lines = append(lines, mutedText("no token usage in range", opts))
@@ -124,6 +182,155 @@ func renderTokenUsageTimeChart(report TokenUsageReport, opts RenderOptions) []st
 	lines = append(lines, splitRenderedLines(chart.View())...)
 	lines = append(lines, mutedText(fmt.Sprintf("max/day %s", formatTokenCount(maxGraph)), opts))
 	return lines
+}
+
+func renderRecentTokenUsageDays(report TokenUsageReport, opts RenderOptions) []string {
+	lines := []string{sectionTitle("Recent days", opts)}
+	days := report.Days
+	if len(days) > tokenUsageRecentTableDays {
+		days = days[len(days)-tokenUsageRecentTableDays:]
+	}
+
+	rows := make([][]string, 0, len(days))
+	for i := len(days) - 1; i >= 0; i-- {
+		day := days[i]
+		rows = append(rows, []string{
+			day.Date,
+			formatTokenMetric(day.Tokens, report.Metric),
+		})
+	}
+	lines = append(lines, renderPrettyTable(
+		[]string{"Date", metricColumnTitle(report.Metric)},
+		rows,
+		opts,
+		1,
+	)...)
+	return lines
+}
+
+type tokenUsageMonth struct {
+	Month        string
+	CalendarDays int
+	ActiveDays   int
+	Tokens       TokenUsageTotal
+	Peak         TokenUsageDay
+}
+
+func tokenUsageMonths(days []TokenUsageDay, metric string, now time.Time) []tokenUsageMonth {
+	byMonth := make(map[string]*tokenUsageMonth)
+	for _, day := range days {
+		if len(day.Date) < len("2006-01") {
+			continue
+		}
+		monthKey := day.Date[:len("2006-01")]
+		month := byMonth[monthKey]
+		if month == nil {
+			month = &tokenUsageMonth{
+				Month:        monthKey,
+				CalendarDays: calendarDaysInUsageMonth(monthKey, now),
+			}
+			byMonth[monthKey] = month
+		}
+		value := tokenMetricValue(day.Tokens, metric)
+		month.Tokens.add(day.Tokens)
+		if value > 0 {
+			month.ActiveDays++
+		}
+		if value > tokenMetricValue(month.Peak.Tokens, metric) {
+			day.Graph = value
+			month.Peak = day
+		}
+	}
+
+	keys := make([]string, 0, len(byMonth))
+	for key := range byMonth {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	months := make([]tokenUsageMonth, 0, len(keys))
+	for _, key := range keys {
+		months = append(months, *byMonth[key])
+	}
+	return months
+}
+
+func calendarDaysInUsageMonth(monthKey string, now time.Time) int {
+	monthStart, err := time.ParseInLocation("2006-01", monthKey, now.Location())
+	if err != nil {
+		return 0
+	}
+	today := startOfLocalDay(now.Local())
+	if monthStart.Year() == today.Year() && monthStart.Month() == today.Month() {
+		return today.Day()
+	}
+	return monthStart.AddDate(0, 1, -1).Day()
+}
+
+func tokenUsageRecentDays(report TokenUsageReport, now time.Time, count int) []TokenUsageDay {
+	if count <= 0 {
+		return nil
+	}
+	index := tokenUsageDayIndex(report.Days)
+	today := startOfLocalDay(now.Local())
+	start := today.AddDate(0, 0, -(count - 1))
+	days := make([]TokenUsageDay, 0, count)
+	for day := start; !day.After(today); day = day.AddDate(0, 0, 1) {
+		key := day.Format("2006-01-02")
+		if usage, ok := index[key]; ok {
+			usage.Graph = tokenMetricValue(usage.Tokens, report.Metric)
+			days = append(days, usage)
+			continue
+		}
+		days = append(days, TokenUsageDay{Date: key})
+	}
+	return days
+}
+
+func tokenUsageDayIndex(days []TokenUsageDay) map[string]TokenUsageDay {
+	index := make(map[string]TokenUsageDay, len(days))
+	for _, day := range days {
+		index[day.Date] = day
+	}
+	return index
+}
+
+func sumTokenUsageRange(index map[string]TokenUsageDay, start, end time.Time) TokenUsageTotal {
+	if end.Before(start) {
+		return TokenUsageTotal{}
+	}
+	var total TokenUsageTotal
+	for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
+		if usage, ok := index[day.Format("2006-01-02")]; ok {
+			total.add(usage.Tokens)
+		}
+	}
+	return total
+}
+
+func renderNow(opts RenderOptions) time.Time {
+	if !opts.Now.IsZero() {
+		return opts.Now
+	}
+	return time.Now()
+}
+
+func metricColumnTitle(metric string) string {
+	switch metric {
+	case "input":
+		return "Input"
+	case "cached":
+		return "Cached"
+	case "output":
+		return "Output"
+	case "reasoning":
+		return "Reason"
+	default:
+		return "Tokens"
+	}
+}
+
+func formatTokenMetric(total TokenUsageTotal, metric string) string {
+	return formatTokenCount(tokenMetricValue(total, metric))
 }
 
 func tokenUsageChartWidth(days int) int {
@@ -165,14 +372,6 @@ func dayLabel(date string) string {
 		return date[8:10]
 	}
 	return date
-}
-
-func titleCaseASCII(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	return strings.ToUpper(value[:1]) + value[1:]
 }
 
 func formatTokenCount(value int64) string {

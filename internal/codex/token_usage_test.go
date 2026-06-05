@@ -153,18 +153,29 @@ func TestRenderTokenUsageShowsDayOverDayGraph(t *testing.T) {
 		Until:         "2026-05-31",
 		FilesScanned:  1,
 		EventsScanned: 1,
-		Total:         TokenUsageTotal{Total: 2000},
+		Total:         TokenUsageTotal{Total: 3000},
 		Days: []TokenUsageDay{
 			{Date: "2026-05-30", Tokens: TokenUsageTotal{Total: 1000}, Graph: 1000},
 			{Date: "2026-05-31", Tokens: TokenUsageTotal{Total: 2000}, Graph: 2000},
 		},
 	}
-	out := RenderTokenUsage(report, RenderOptions{})
+	out := RenderTokenUsage(report, RenderOptions{
+		Now: time.Date(2026, 5, 31, 12, 0, 0, 0, time.Local),
+	})
 	if !strings.Contains(out, "Codex token usage") {
 		t.Fatalf("missing title:\n%s", out)
 	}
-	if !strings.Contains(out, "Tokens/day graph") {
+	if !strings.Contains(out, "Summary") {
+		t.Fatalf("missing token usage summary:\n%s", out)
+	}
+	if !strings.Contains(out, "Monthly usage") {
+		t.Fatalf("missing monthly usage section:\n%s", out)
+	}
+	if !strings.Contains(out, "Daily usage, last 30 days") {
 		t.Fatalf("missing time chart:\n%s", out)
+	}
+	if !strings.Contains(out, "Recent days") {
+		t.Fatalf("missing recent days table:\n%s", out)
 	}
 	if strings.Contains(out, "#") {
 		t.Fatalf("output should not use ASCII hash graphs:\n%s", out)
@@ -172,21 +183,59 @@ func TestRenderTokenUsageShowsDayOverDayGraph(t *testing.T) {
 	if strings.Contains(out, "Graph") {
 		t.Fatalf("day summary should not include a graph column:\n%s", out)
 	}
-	if !strings.Contains(out, "Aggregate") {
-		t.Fatalf("missing aggregate row:\n%s", out)
+	for _, wanted := range []string{"Today", "Last 7 days", "This month", "All local", "2026-05", "2/31", "2026-05-31 2K"} {
+		if !strings.Contains(out, wanted) {
+			t.Fatalf("missing token usage detail %q:\n%s", wanted, out)
+		}
 	}
-	if !strings.Contains(out, "│ Aggregate") {
-		t.Fatalf("aggregate should remain in the daily table:\n%s", out)
-	}
-	if !strings.Contains(out, "│ "+tableSeparatorCell) {
-		t.Fatalf("missing separator before aggregate row:\n%s", out)
-	}
-	if strings.Contains(out, "aggregate ") {
-		t.Fatalf("chart footer should not repeat aggregate:\n%s", out)
-	}
-	for _, unwanted := range []string{"files", "events", "Sessions", "Events", "roots"} {
+	for _, unwanted := range []string{"Aggregate", "files", "events", "Sessions", "Events", "roots", "Cached", "Reason"} {
 		if strings.Contains(out, unwanted) {
 			t.Fatalf("pretty output includes unwanted detail %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+func TestRenderTokenUsageShowsMonthlyActiveDaysAndPeaks(t *testing.T) {
+	report := TokenUsageReport{
+		Metric: "tokens",
+		Since:  "2026-04-08",
+		Until:  "2026-06-05",
+		Total:  TokenUsageTotal{Total: 762_000_000},
+		Days: []TokenUsageDay{
+			{Date: "2026-04-08", Tokens: TokenUsageTotal{Total: 508_000_000}},
+			{Date: "2026-04-09", Tokens: TokenUsageTotal{Total: 100_000_000}},
+			{Date: "2026-05-31", Tokens: TokenUsageTotal{Total: 124_000_000}},
+			{Date: "2026-06-01", Tokens: TokenUsageTotal{Total: 10_000_000}},
+			{Date: "2026-06-05", Tokens: TokenUsageTotal{Total: 20_000_000}},
+		},
+	}
+
+	out := RenderTokenUsage(report, RenderOptions{
+		Now: time.Date(2026, 6, 5, 12, 0, 0, 0, time.Local),
+	})
+
+	for _, wanted := range []string{
+		"Today",
+		"Last 7 days",
+		"This month",
+		"Last month",
+		"All local",
+		"154M",
+		"762M",
+		"2026-04",
+		"2/30",
+		"608M",
+		"2026-04-08 508M",
+		"2026-05",
+		"1/31",
+		"2026-05-31 124M",
+		"2026-06",
+		"2/5",
+		"30M",
+		"2026-06-05 20M",
+	} {
+		if !strings.Contains(out, wanted) {
+			t.Fatalf("missing token usage detail %q:\n%s", wanted, out)
 		}
 	}
 }
