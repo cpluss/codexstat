@@ -194,6 +194,7 @@ func trimFloat(value float64) string {
 
 type HistoryQuery struct {
 	Days   int       `json:"days"`
+	All    bool      `json:"all,omitempty"`
 	Metric string    `json:"metric"`
 	Now    time.Time `json:"now"`
 	Path   string    `json:"path,omitempty"`
@@ -345,16 +346,43 @@ func BuildHistoryReport(records []HistoryRecord, query HistoryQuery) (HistoryRep
 		return HistoryReport{}, fmt.Errorf("unknown quota history metric %q; expected weekly or session", query.Metric)
 	}
 	if query.Days <= 0 {
-		query.Days = 7
+		query.All = true
 	}
 	if query.Now.IsZero() {
 		query.Now = time.Now()
 	}
 
-	local := query.Now.Local()
-	today := startOfLocalDay(local)
-	since := today.AddDate(0, 0, -(query.Days - 1))
-	until := today.AddDate(0, 0, 1)
+	var since, until time.Time
+	if query.All {
+		var found bool
+		for _, record := range records {
+			capturedAt := historyRecordTime(record)
+			if capturedAt.IsZero() {
+				continue
+			}
+			day := startOfLocalDay(capturedAt.Local())
+			if !found || day.Before(since) {
+				since = day
+			}
+			if !found || day.After(until) {
+				until = day
+			}
+			found = true
+		}
+		if !found {
+			return HistoryReport{
+				Path:      query.Path,
+				Metric:    metric,
+				TotalRows: len(records),
+			}, nil
+		}
+		until = until.AddDate(0, 0, 1)
+	} else {
+		local := query.Now.Local()
+		today := startOfLocalDay(local)
+		since = today.AddDate(0, 0, -(query.Days - 1))
+		until = today.AddDate(0, 0, 1)
+	}
 
 	byDate := make(map[string]*HistoryDay)
 	for day := since; day.Before(until); day = day.AddDate(0, 0, 1) {
@@ -364,10 +392,7 @@ func BuildHistoryReport(records []HistoryRecord, query HistoryQuery) (HistoryRep
 
 	matched := 0
 	for _, record := range records {
-		capturedAt := record.CapturedAt
-		if capturedAt.IsZero() {
-			capturedAt = record.Snapshot.UpdatedAt
-		}
+		capturedAt := historyRecordTime(record)
 		if capturedAt.IsZero() {
 			continue
 		}
@@ -406,6 +431,13 @@ func BuildHistoryReport(records []HistoryRecord, query HistoryQuery) (HistoryRep
 		MatchedRows: matched,
 		Days:        days,
 	}, nil
+}
+
+func historyRecordTime(record HistoryRecord) time.Time {
+	if !record.CapturedAt.IsZero() {
+		return record.CapturedAt
+	}
+	return record.Snapshot.UpdatedAt
 }
 
 func applyHistorySample(day *HistoryDay, snapshot Snapshot) {

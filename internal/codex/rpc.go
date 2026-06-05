@@ -62,7 +62,7 @@ func newRPCClient(ctx context.Context, opts Options) (*rpcClient, error) {
 	if !strings.Contains(bin, "/") {
 		resolved, err := exec.LookPath(bin)
 		if err != nil {
-			return nil, fmt.Errorf("Codex CLI not found on PATH; install `codex` or pass --codex-bin: %w", err)
+			return nil, fmt.Errorf("Codex CLI not found on PATH; install `codex`: %w", err)
 		}
 		bin = resolved
 	}

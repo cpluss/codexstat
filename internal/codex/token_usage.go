@@ -16,13 +16,23 @@ import (
 
 type TokenUsageQuery struct {
 	Days      int       `json:"days"`
+	All       bool      `json:"all,omitempty"`
 	Metric    string    `json:"metric"`
 	Now       time.Time `json:"now"`
 	CodexHome string    `json:"codex_home,omitempty"`
 	Env       map[string]string
+	Progress  func(TokenUsageProgress) `json:"-"`
 }
 
-const DefaultTokenUsageDays = 7
+type TokenUsageProgress struct {
+	Phase         string `json:"phase"`
+	FilesTotal    int    `json:"files_total"`
+	FilesVisited  int    `json:"files_visited"`
+	FilesScanned  int    `json:"files_scanned"`
+	EventsScanned int    `json:"events_scanned"`
+	CurrentFile   string `json:"current_file,omitempty"`
+	Done          bool   `json:"done"`
+}
 
 type TokenUsageReport struct {
 	Metric        string          `json:"metric"`
@@ -76,17 +86,17 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 	}
 
 	today := startOfLocalDay(query.Now.Local())
-	since := today.AddDate(0, 0, -(query.Days - 1))
-	until := today.AddDate(0, 0, 1)
-	scanSince := since.AddDate(0, 0, -1)
-	scanUntil := until.AddDate(0, 0, 1)
-
 	dayMap := make(map[string]*tokenUsageDayBuilder)
-	for day := since; day.Before(until); day = day.AddDate(0, 0, 1) {
-		key := day.Format("2006-01-02")
-		dayMap[key] = &tokenUsageDayBuilder{
-			day:      TokenUsageDay{Date: key},
-			sessions: make(map[string]bool),
+
+	var since, until, scanSince, scanUntil time.Time
+	if !query.All {
+		since = today.AddDate(0, 0, -(query.Days - 1))
+		until = today.AddDate(0, 0, 1)
+		scanSince = since.AddDate(0, 0, -1)
+		scanUntil = until.AddDate(0, 0, 1)
+		for day := since; day.Before(until); day = day.AddDate(0, 0, 1) {
+			key := day.Format("2006-01-02")
+			dayMap[key] = newTokenUsageDayBuilder(key)
 		}
 	}
 
@@ -94,22 +104,35 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 	if err != nil {
 		return empty, err
 	}
+	reportTokenUsageProgress(query, TokenUsageProgress{Phase: "discovering"})
 	files, err := listCodexTokenFiles(roots, scanSince, scanUntil)
 	if err != nil {
 		empty.Roots = roots
 		return empty, err
 	}
+	reportTokenUsageProgress(query, TokenUsageProgress{
+		Phase:      "scanning",
+		FilesTotal: len(files),
+	})
 
 	seenBase := make(map[string]bool)
 	eventsScanned := 0
 	filesScanned := 0
-	for _, file := range files {
+	for index, file := range files {
 		base := filepath.Base(file)
 		if seenBase[base] {
+			reportTokenUsageProgress(query, TokenUsageProgress{
+				Phase:         "scanning",
+				FilesTotal:    len(files),
+				FilesVisited:  index + 1,
+				FilesScanned:  filesScanned,
+				EventsScanned: eventsScanned,
+				CurrentFile:   file,
+			})
 			continue
 		}
 		seenBase[base] = true
-		fileEvents, err := scanCodexTokenFile(file, since, until, dayMap)
+		fileEvents, err := scanCodexTokenFile(file, since, until, dayMap, query.All)
 		if err != nil {
 			empty.Roots = roots
 			return empty, err
@@ -118,24 +141,34 @@ func BuildTokenUsageReport(query TokenUsageQuery) (TokenUsageReport, error) {
 			filesScanned++
 			eventsScanned += fileEvents
 		}
+		reportTokenUsageProgress(query, TokenUsageProgress{
+			Phase:         "scanning",
+			FilesTotal:    len(files),
+			FilesVisited:  index + 1,
+			FilesScanned:  filesScanned,
+			EventsScanned: eventsScanned,
+			CurrentFile:   file,
+		})
 	}
-
-	days := make([]TokenUsageDay, 0, len(dayMap))
-	var total TokenUsageTotal
-	for _, builder := range dayMap {
-		builder.day.Sessions = len(builder.sessions)
-		builder.day.Graph = tokenMetricValue(builder.day.Tokens, query.Metric)
-		total.add(builder.day.Tokens)
-		days = append(days, builder.day)
-	}
-	sort.Slice(days, func(i, j int) bool {
-		return days[i].Date < days[j].Date
+	reportTokenUsageProgress(query, TokenUsageProgress{
+		Phase:         "done",
+		FilesTotal:    len(files),
+		FilesVisited:  len(files),
+		FilesScanned:  filesScanned,
+		EventsScanned: eventsScanned,
+		Done:          true,
 	})
+
+	days, total, reportSince, reportUntil := tokenUsageDaysFromMap(dayMap, query.Metric, query.All)
+	if !query.All {
+		reportSince = since.Format("2006-01-02")
+		reportUntil = until.AddDate(0, 0, -1).Format("2006-01-02")
+	}
 
 	return TokenUsageReport{
 		Metric:        query.Metric,
-		Since:         since.Format("2006-01-02"),
-		Until:         until.AddDate(0, 0, -1).Format("2006-01-02"),
+		Since:         reportSince,
+		Until:         reportUntil,
 		Roots:         roots,
 		FilesScanned:  filesScanned,
 		EventsScanned: eventsScanned,
@@ -148,6 +181,11 @@ func EmptyTokenUsageReport(query TokenUsageQuery) TokenUsageReport {
 	query = normalizeTokenUsageQuery(query)
 	if !isTokenHistoryMetric(query.Metric) {
 		query.Metric = "tokens"
+	}
+	if query.All {
+		return TokenUsageReport{
+			Metric: query.Metric,
+		}
 	}
 	today := startOfLocalDay(query.Now.Local())
 	since := today.AddDate(0, 0, -(query.Days - 1))
@@ -164,10 +202,16 @@ func EmptyTokenUsageReport(query TokenUsageQuery) TokenUsageReport {
 	}
 }
 
+func reportTokenUsageProgress(query TokenUsageQuery, progress TokenUsageProgress) {
+	if query.Progress != nil {
+		query.Progress(progress)
+	}
+}
+
 func normalizeTokenUsageQuery(query TokenUsageQuery) TokenUsageQuery {
 	query.Metric = normalizeTokenMetric(query.Metric)
 	if query.Days <= 0 {
-		query.Days = DefaultTokenUsageDays
+		query.All = true
 	}
 	if query.Now.IsZero() {
 		query.Now = time.Now()
@@ -178,6 +222,50 @@ func normalizeTokenUsageQuery(query TokenUsageQuery) TokenUsageQuery {
 type tokenUsageDayBuilder struct {
 	day      TokenUsageDay
 	sessions map[string]bool
+}
+
+func newTokenUsageDayBuilder(date string) *tokenUsageDayBuilder {
+	return &tokenUsageDayBuilder{
+		day:      TokenUsageDay{Date: date},
+		sessions: make(map[string]bool),
+	}
+}
+
+func tokenUsageDaysFromMap(dayMap map[string]*tokenUsageDayBuilder, metric string, fillGaps bool) ([]TokenUsageDay, TokenUsageTotal, string, string) {
+	keys := make([]string, 0, len(dayMap))
+	for key := range dayMap {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return nil, TokenUsageTotal{}, "", ""
+	}
+
+	if fillGaps {
+		first, firstErr := time.Parse("2006-01-02", keys[0])
+		last, lastErr := time.Parse("2006-01-02", keys[len(keys)-1])
+		if firstErr == nil && lastErr == nil {
+			keys = keys[:0]
+			for day := first; !day.After(last); day = day.AddDate(0, 0, 1) {
+				keys = append(keys, day.Format("2006-01-02"))
+			}
+		}
+	}
+
+	days := make([]TokenUsageDay, 0, len(keys))
+	var total TokenUsageTotal
+	for _, key := range keys {
+		builder := dayMap[key]
+		if builder == nil {
+			days = append(days, TokenUsageDay{Date: key})
+			continue
+		}
+		builder.day.Sessions = len(builder.sessions)
+		builder.day.Graph = tokenMetricValue(builder.day.Tokens, metric)
+		total.add(builder.day.Tokens)
+		days = append(days, builder.day)
+	}
+	return days, total, keys[0], keys[len(keys)-1]
 }
 
 func codexSessionRoots(query TokenUsageQuery) ([]string, error) {
@@ -195,8 +283,13 @@ func codexSessionRoots(query TokenUsageQuery) ([]string, error) {
 }
 
 func listCodexTokenFiles(roots []string, scanSince, scanUntil time.Time) ([]string, error) {
-	scanSinceKey := scanSince.Format("2006-01-02")
-	scanUntilKey := scanUntil.AddDate(0, 0, -1).Format("2006-01-02")
+	filterByDate := !scanSince.IsZero() && !scanUntil.IsZero()
+	scanSinceKey := ""
+	scanUntilKey := ""
+	if filterByDate {
+		scanSinceKey = scanSince.Format("2006-01-02")
+		scanUntilKey = scanUntil.AddDate(0, 0, -1).Format("2006-01-02")
+	}
 	var files []string
 	for _, root := range roots {
 		if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
@@ -214,7 +307,7 @@ func listCodexTokenFiles(roots []string, scanSince, scanUntil time.Time) ([]stri
 			if filepath.Ext(path) != ".jsonl" {
 				return nil
 			}
-			if day := dateKeyFromCodexSessionPath(path); day != "" {
+			if day := dateKeyFromCodexSessionPath(path); filterByDate && day != "" {
 				if day < scanSinceKey || day > scanUntilKey {
 					return nil
 				}
@@ -260,7 +353,7 @@ func isDateKey(value string) bool {
 	return err == nil
 }
 
-func scanCodexTokenFile(path string, since, until time.Time, days map[string]*tokenUsageDayBuilder) (int, error) {
+func scanCodexTokenFile(path string, since, until time.Time, days map[string]*tokenUsageDayBuilder, expandDays bool) (int, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -276,7 +369,7 @@ func scanCodexTokenFile(path string, since, until time.Time, days map[string]*to
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
 			if bytes.Contains(line, []byte(`"token_count"`)) {
-				counted, err := scanCodexTokenLine(bytes.TrimSpace(line), sessionKey, since, until, days, &counter)
+				counted, err := scanCodexTokenLine(bytes.TrimSpace(line), sessionKey, since, until, days, &counter, expandDays)
 				if err != nil {
 					return events, fmt.Errorf("%s: %w", path, err)
 				}
@@ -302,6 +395,7 @@ func scanCodexTokenLine(
 	until time.Time,
 	days map[string]*tokenUsageDayBuilder,
 	counter *tokenUsageCounter,
+	expandDays bool,
 ) (bool, error) {
 	var event codexTokenEvent
 	if err := json.Unmarshal(line, &event); err != nil {
@@ -323,13 +417,20 @@ func scanCodexTokenLine(
 	}
 
 	localTime := timestamp.Local()
-	if localTime.Before(since) || !localTime.Before(until) {
+	if !since.IsZero() && localTime.Before(since) {
+		return false, nil
+	}
+	if !until.IsZero() && !localTime.Before(until) {
 		return false, nil
 	}
 	dayKey := startOfLocalDay(localTime).Format("2006-01-02")
 	day := days[dayKey]
 	if day == nil {
-		return false, nil
+		if !expandDays {
+			return false, nil
+		}
+		day = newTokenUsageDayBuilder(dayKey)
+		days[dayKey] = day
 	}
 	day.day.Events++
 	day.day.Tokens.add(delta)

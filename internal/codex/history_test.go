@@ -85,6 +85,50 @@ func TestBuildHistoryReportBucketsExplicitRecords(t *testing.T) {
 	}
 }
 
+func TestBuildHistoryReportDefaultsToAvailableRecordSpan(t *testing.T) {
+	now := time.Date(2026, 5, 31, 9, 0, 0, 0, time.Local)
+	records := []HistoryRecord{
+		{
+			Version:    historyVersion,
+			CapturedAt: time.Date(2026, 5, 20, 9, 0, 0, 0, time.Local),
+			Snapshot: Snapshot{
+				Provider: "codex",
+				Source:   SourceOAuth,
+				Weekly:   &Window{UsedPercent: 10, RemainingPercent: 90},
+			},
+		},
+		{
+			Version:    historyVersion,
+			CapturedAt: time.Date(2026, 5, 22, 9, 0, 0, 0, time.Local),
+			Snapshot: Snapshot{
+				Provider: "codex",
+				Source:   SourceOAuth,
+				Weekly:   &Window{UsedPercent: 30, RemainingPercent: 70},
+			},
+		},
+	}
+
+	report, err := BuildHistoryReport(records, HistoryQuery{
+		Metric: "weekly",
+		Now:    now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Since != "2026-05-20" || report.Until != "2026-05-22" {
+		t.Fatalf("unexpected report bounds: %#v", report)
+	}
+	if len(report.Days) != 3 {
+		t.Fatalf("got %d days, want 3", len(report.Days))
+	}
+	if report.MatchedRows != 2 {
+		t.Fatalf("got %d matched rows, want 2", report.MatchedRows)
+	}
+	if report.Days[1].Date != "2026-05-21" || report.Days[1].WeeklyLastUsed != nil {
+		t.Fatalf("missing zero-filled gap day: %#v", report.Days[1])
+	}
+}
+
 func TestDefaultHistoryPathUsesOverride(t *testing.T) {
 	path, err := DefaultHistoryPath(map[string]string{
 		"CODEXSTAT_HISTORY": "~/custom/history.jsonl",

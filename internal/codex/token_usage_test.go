@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +86,63 @@ func TestBuildTokenUsageReportUsesOutputMetric(t *testing.T) {
 	}
 	if report.Days[0].Graph != 25 {
 		t.Fatalf("got graph value %d, want 25", report.Days[0].Graph)
+	}
+}
+
+func TestBuildTokenUsageReportDefaultsToAvailableHistory(t *testing.T) {
+	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.Local)
+	home := t.TempDir()
+
+	writeTokenFile := func(path, timestamp string, total int64) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		line := fmt.Sprintf(
+			`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":%d,"output_tokens":10,"total_tokens":%d}}}}`,
+			timestamp,
+			total,
+			total+10,
+		)
+		if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeTokenFile(
+		filepath.Join(home, "sessions", "2026", "05", "20", "rollout-2026-05-20T10-00-00-old.jsonl"),
+		"2026-05-20T09:00:00Z",
+		100,
+	)
+	writeTokenFile(
+		filepath.Join(home, "sessions", "2026", "05", "22", "rollout-2026-05-22T10-00-00-new.jsonl"),
+		"2026-05-22T09:00:00Z",
+		300,
+	)
+
+	report, err := BuildTokenUsageReport(TokenUsageQuery{
+		Metric:    "tokens",
+		Now:       now,
+		CodexHome: home,
+		Env:       map[string]string{"HOME": home},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Since != "2026-05-20" || report.Until != "2026-05-22" {
+		t.Fatalf("unexpected report bounds: %#v", report)
+	}
+	if len(report.Days) != 3 {
+		t.Fatalf("got %d days, want 3", len(report.Days))
+	}
+	if report.Days[1].Date != "2026-05-21" || report.Days[1].Tokens.Total != 0 {
+		t.Fatalf("missing zero-filled gap day: %#v", report.Days[1])
+	}
+	if report.FilesScanned != 2 || report.EventsScanned != 2 {
+		t.Fatalf("unexpected scan counts: files=%d events=%d", report.FilesScanned, report.EventsScanned)
+	}
+	if report.Total.Total != 420 {
+		t.Fatalf("unexpected total: %#v", report.Total)
 	}
 }
 
